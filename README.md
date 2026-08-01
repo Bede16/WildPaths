@@ -1,14 +1,33 @@
 # Wild Paths
 
-Wild Paths is a lightweight server-side NeoForge mod for Minecraft 1.21.1. Dirt paths can recover after a period without use, while stone can slowly become mossy during rain. Vanilla Minecraft can then continue updating the resulting blocks normally.
+Wild Paths is a lightweight server-side NeoForge mod for Minecraft 1.21.1. Repeated player traffic can form paths, unused dirt paths can recover, and stone can slowly become mossy during rain. Vanilla Minecraft can then continue updating the resulting blocks normally.
+
+## How it works
+
+Wild Paths turns player movement and environmental exposure into configurable block progression:
+
+```text
+tall_grass -> short_grass -> air
+                              |
+                              v
+grass_block -> dirt -> dirt_path -> dirt
+
+cobblestone  --rain--> mossy_cobblestone
+stone_bricks --rain--> mossy_stone_bricks
+```
+
+Every player crossing contributes to the block being used. Walking back and forth and landing after a jump count again, while standing still does not. Each stage has a protected number of crossings followed by an increasing transition probability. Strong traffic can also give nearby surface blocks a smaller amount of wear, producing irregular, natural-looking path edges. Unused dirt paths later recover through the independent timed-transition system.
 
 ## Features
 
 - Supports configurable block-to-block transitions
+- Creates configurable, multi-stage paths from repeated player traffic
+- Tramples tall grass into short grass and short grass into air in configurable stages
 - Discovers matching surface blocks incrementally around players
 - Resets configurable transitions when a player walks on the block
 - Supports increasing transition probabilities after a protected period
 - Supports rain-dependent transitions for exposed blocks
+- Protects blocks from every transition when wool is placed directly underneath
 - Persists tracked positions and timestamps with each world
 - Processes a bounded number of entries per interval to avoid tick-time spikes
 - Never force-loads unloaded chunks and limits nearby scanning work
@@ -21,13 +40,22 @@ Wild Paths is a lightweight server-side NeoForge mod for Minecraft 1.21.1. Dirt 
 - NeoForge 21.1.235 or newer in the 21.1 line
 - Java 21
 
+## Installation
+
+1. Install NeoForge for Minecraft 1.21.1.
+2. Place the Wild Paths JAR in the world or server `mods` directory.
+3. Start the game or server once to create `config/wild_paths.json5`.
+4. Edit the JSON5 file if desired, then run `/wildpaths reload` or restart.
+
+Dedicated-server players do not need to install Wild Paths on their clients. Singleplayer installations place the JAR in the normal client `mods` directory because the integrated server runs inside the game.
+
 ## Configuration
 
-Wild Paths creates one configuration file, `config/wild_paths.json5`, on the first server start. JSON5 supports comments and trailing commas. The default file is:
+Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 supports comments and trailing commas. The default file is:
 
 ```json5
 {
-  configVersion: 2,
+  configVersion: 3,
 
   // Limits how much work Wild Paths performs at once.
   processing: {
@@ -37,6 +65,63 @@ Wild Paths creates one configuration file, `config/wild_paths.json5`, on the fir
     nearbyScanRadius: 24,
     nearbyScanDepth: 6,
     nearbyScanColumnsPerPlayer: 128,
+  },
+
+  // Repeated player traffic can form paths in multiple configurable stages.
+  pathCreation: {
+    enabled: true,
+    // Air is always allowed. Entries beginning with # are block tags.
+    allowedAbove: [
+      // "#minecraft:flowers",
+      // "minecraft:short_grass",
+      // "minecraft:tall_grass",
+      // "minecraft:fern",
+      // "minecraft:large_fern",
+      // "minecraft:dead_bush",
+    ],
+    transitions: [
+      {
+        from: "minecraft:grass_block",
+        to: "minecraft:dirt",
+        minimumWalks: 20,
+        chance: 0.05,
+        chanceIncrease: 0.02,
+        maxChance: 0.50,
+        neighborChance: 0.15,
+      },
+      {
+        from: "minecraft:dirt",
+        to: "minecraft:dirt_path",
+        minimumWalks: 15,
+        chance: 0.08,
+        chanceIncrease: 0.03,
+        maxChance: 0.60,
+        neighborChance: 0.15,
+      },
+    ],
+  },
+
+  // Plants are worn down only by direct player traffic, not neighboring wear.
+  trampling: {
+    enabled: true,
+    transitions: [
+      {
+        from: "minecraft:tall_grass",
+        to: "minecraft:short_grass",
+        minimumWalks: 2,
+        chance: 0.25,
+        chanceIncrease: 0.15,
+        maxChance: 1.0,
+      },
+      {
+        from: "minecraft:short_grass",
+        to: "minecraft:air",
+        minimumWalks: 3,
+        chance: 0.20,
+        chanceIncrease: 0.10,
+        maxChance: 0.80,
+      },
+    ],
   },
 
   // Matching surface blocks are discovered gradually near active players.
@@ -80,6 +165,16 @@ Wild Paths creates one configuration file, `config/wild_paths.json5`, on the fir
 
 Each `from` block may appear only once. `ticks` is the protected time before the first roll. `chanceInterval` controls the delay between rolls. `chance` is the initial probability from greater than `0.0` through `1.0`; `chanceIncrease` is added after each failed roll, up to `maxChance`. Walking on a rule with `resetOnWalk` restarts its protected time and probability. When `requiresRain` is enabled, a roll only happens while rain can reach the block.
 
+`pathCreation.transitions` contains the separate rules driven by player traffic. `minimumWalks` is the guaranteed number of crossings before any roll can happen. Each later crossing rolls `chance`, increases it by `chanceIncrease` after a failure, and caps it at `maxChance`. A successful transition clears all wear at that position, so the next configured stage always starts at zero. With the defaults this produces `grass_block` -> `dirt` -> `dirt_path`. Every player and every renewed crossing counts, including walking back and forth or landing after a jump. Standing still, flying, and creatures do not add repeated wear.
+
+Path creation requires air above the affected block unless the block above matches `allowedAbove`. The whitelist accepts exact block IDs and block tags prefixed with `#`. It is empty by default; commented examples for flowers, grass, ferns, and dead bushes can be enabled individually. Other plants or modded blocks can be added without changing the mod.
+
+`trampling.transitions` uses the same protected-walk and increasing-probability model, but only for blocks a player directly moves through. The defaults produce `tall_grass` -> `short_grass` -> `air`; counts reset between both stages, tall grass's upper half is removed correctly, and neighboring wear never affects plants. Once the plant is gone, later traffic can begin wearing the ground underneath. The wool block underneath that ground protects both the plant and every ground stage.
+
+For every real crossing, each of the eight horizontal neighboring surface blocks independently receives one additional wear point with `neighborChance`. The search follows terrain one block upward or downward, never loads chunks, and still respects each neighbor's own `minimumWalks`, probability progression, and wool protection. Set `neighborChance` to `0.0` to disable spreading for a rule.
+
+Placing any color of wool directly underneath a block protects it from both path creation and timed transitions. Existing walk counters, probabilities, and decay timers for that block are cleared. Removing the wool removes the protection, and progress starts again from zero.
+
 `discoverNearby` lets the bounded surface scanner find blocks without requiring a player to step directly on them. Each second it checks at most `nearbyScanColumnsPerPlayer` columns within `nearbyScanRadius`, and only `nearbyScanDepth` blocks below the surface. It skips unloaded chunks. Setting the column count to `0` disables nearby discovery. With very large tracking sets, a block can change later because work is intentionally spread across multiple processing passes. Run `/wildpaths reload` or restart the server after editing the JSON5 file.
 
 `configVersion` is managed by Wild Paths. When a newer mod release needs a newer configuration structure, the file is upgraded automatically on server start. Existing values and custom transitions are retained, and the original file is saved beside it as `wild_paths.json5.before-vN.backup`. A newer config is never automatically downgraded by an older mod release.
@@ -89,8 +184,10 @@ Each `from` block may appear only once. `ticks` is the protected time before the
 Wild Paths provides these administrator commands (permission level 2):
 
 - `/wildpaths reload` reloads `wild_paths.json5` without restarting the server.
-- `/wildpaths status` shows the number of configured transitions, tracked blocks, enabled dimensions, and current processing limits.
-- `/wildpaths debug <x> <y> <z>` shows the transition, remaining protected time, next roll, failed rolls, current chance, and rain state for one loaded block.
+- `/wildpaths status` shows configured timed, path-creation, and trampling transitions plus tracked-block and processing statistics.
+- `/wildpaths debug <x> <y> <z>` shows timed, path-creation, or trampling progress for one loaded block.
+- `/wildpaths debug on` or `/wildpaths debug true` enables a live action-bar display for the block the player is looking at.
+- `/wildpaths debug off` or `/wildpaths debug false` disables the live display.
 
 The coordinate argument supports absolute and relative Minecraft coordinates, for example `/wildpaths debug ~ ~-1 ~`.
 
@@ -102,7 +199,7 @@ gradlew.bat build
 
 The finished mod JAR is written to `build/libs/`.
 
-Successful builds on `main` automatically create a tagged GitHub Release when the `mod_version` has not been published before. The matching mod JAR is attached directly to that release. Further commits with the same version leave the existing release unchanged.
+Every push and pull request runs the GitHub build and stores the matching JAR as a workflow artifact. Manually running the Build workflow on `main` additionally creates a tagged GitHub Release when that `mod_version` has not been published before. Existing releases are never overwritten.
 
 ## License
 

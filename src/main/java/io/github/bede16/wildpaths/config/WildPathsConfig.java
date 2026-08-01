@@ -8,8 +8,12 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.stream.JsonReader;
 import io.github.bede16.wildpaths.WildPaths;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.fml.loading.FMLPaths;
@@ -19,18 +23,20 @@ import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Loads all Wild Paths settings from one JSON5 file. */
 public final class WildPathsConfig {
     public static final String FILE_NAME = "wild_paths.json5";
-    private static final int CURRENT_CONFIG_VERSION = 2;
+    private static final int CURRENT_CONFIG_VERSION = 3;
     private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
 
     private static final String DEFAULT_JSON5 = """
             {
-              configVersion: 2,
+              configVersion: 3,
 
               // Limits how much work Wild Paths performs at once.
               processing: {
@@ -40,6 +46,64 @@ public final class WildPathsConfig {
                 nearbyScanRadius: 24,
                 nearbyScanDepth: 6,
                 nearbyScanColumnsPerPlayer: 128,
+              },
+
+              // Repeated player traffic can form paths in multiple configurable stages.
+              pathCreation: {
+                enabled: true,
+                // Air is always allowed. Entries beginning with # are block tags.
+                allowedAbove: [
+                  // "#minecraft:flowers",
+                  // "minecraft:short_grass",
+                  // "minecraft:tall_grass",
+                  // "minecraft:fern",
+                  // "minecraft:large_fern",
+                  // "minecraft:dead_bush",
+                ],
+                transitions: [
+                  {
+                    from: "minecraft:grass_block",
+                    to: "minecraft:dirt",
+                    minimumWalks: 20,
+                    chance: 0.05,
+                    chanceIncrease: 0.02,
+                    maxChance: 0.50,
+                    // Each horizontal neighbor has a small chance to gain one wear point.
+                    neighborChance: 0.15,
+                  },
+                  {
+                    from: "minecraft:dirt",
+                    to: "minecraft:dirt_path",
+                    minimumWalks: 15,
+                    chance: 0.08,
+                    chanceIncrease: 0.03,
+                    maxChance: 0.60,
+                    neighborChance: 0.15,
+                  },
+                ],
+              },
+
+              // Plants can be worn down in separate stages by direct player traffic.
+              trampling: {
+                enabled: true,
+                transitions: [
+                  {
+                    from: "minecraft:tall_grass",
+                    to: "minecraft:short_grass",
+                    minimumWalks: 2,
+                    chance: 0.25,
+                    chanceIncrease: 0.15,
+                    maxChance: 1.0,
+                  },
+                  {
+                    from: "minecraft:short_grass",
+                    to: "minecraft:air",
+                    minimumWalks: 3,
+                    chance: 0.20,
+                    chanceIncrease: 0.10,
+                    maxChance: 0.80,
+                  },
+                ],
               },
 
               // Matching surface blocks are discovered gradually near active players.
@@ -81,7 +145,9 @@ public final class WildPathsConfig {
             }
             """;
 
-    private static volatile Settings settings = new Settings(200, 1_024, false, 24, 6, 128, Map.of());
+    private static volatile Settings settings = new Settings(
+            200, 1_024, false, 24, 6, 128, true, List.of(), Map.of(), true, Map.of(), Map.of()
+    );
 
     public static synchronized boolean load() {
         Path configPath = FMLPaths.CONFIGDIR.get().resolve(FILE_NAME);
@@ -112,7 +178,13 @@ public final class WildPathsConfig {
             }
 
             settings = parse(root);
-            WildPaths.LOGGER.info("Loaded {} Wild Paths transitions from {}", settings.transitions().size(), configPath);
+            WildPaths.LOGGER.info(
+                    "Loaded {} timed, {} path creation, and {} trampling transitions from {}",
+                    settings.transitions().size(),
+                    settings.pathCreationTransitions().size(),
+                    settings.tramplingTransitions().size(),
+                    configPath
+            );
             return true;
         } catch (Exception exception) {
             WildPaths.LOGGER.error("Could not load {}. Using built-in defaults.", configPath, exception);
@@ -149,8 +221,47 @@ public final class WildPathsConfig {
         return settings.transitions().size();
     }
 
+    public static boolean pathCreationEnabled() {
+        return settings.pathCreationEnabled();
+    }
+
+    public static int pathCreationTransitionCount() {
+        return settings.pathCreationTransitions().size();
+    }
+
+    public static int tramplingTransitionCount() {
+        return settings.tramplingTransitions().size();
+    }
+
     public static TransitionRule find(BlockState state) {
         return settings.transitions().get(state.getBlock());
+    }
+
+    public static PathCreationRule findPathCreation(BlockState state) {
+        if (!settings.pathCreationEnabled()) {
+            return null;
+        }
+        return settings.pathCreationTransitions().get(state.getBlock());
+    }
+
+    public static TramplingRule findTrampling(BlockState state) {
+        if (!settings.tramplingEnabled()) {
+            return null;
+        }
+        return settings.tramplingTransitions().get(state.getBlock());
+    }
+
+    public static boolean isPathCreationSpaceAllowed(ServerLevel level, BlockPos pos) {
+        BlockState above = level.getBlockState(pos.above());
+        if (above.isAir()) {
+            return true;
+        }
+        for (AllowedAbove matcher : settings.pathCreationAllowedAbove()) {
+            if (matcher.matches(above)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Settings parse(Reader source) {
@@ -179,6 +290,90 @@ public final class WildPathsConfig {
         int nearbyScanRadius = optionalRangedInt(processing, "nearbyScanRadius", 24, 0, 128);
         int nearbyScanDepth = optionalRangedInt(processing, "nearbyScanDepth", 6, 0, 64);
         int nearbyScanColumns = optionalRangedInt(processing, "nearbyScanColumnsPerPlayer", 128, 0, 10_000);
+
+        JsonObject pathCreation = root.getAsJsonObject("pathCreation");
+        if (pathCreation == null) {
+            throw new IllegalArgumentException("Missing pathCreation object");
+        }
+        boolean pathCreationEnabled = !pathCreation.has("enabled") || pathCreation.get("enabled").getAsBoolean();
+        JsonArray allowedAboveEntries = pathCreation.getAsJsonArray("allowedAbove");
+        if (allowedAboveEntries == null) {
+            throw new IllegalArgumentException("Missing pathCreation allowedAbove array");
+        }
+        List<AllowedAbove> pathCreationAllowedAbove = new ArrayList<>();
+        for (JsonElement element : allowedAboveEntries) {
+            if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+                throw new IllegalArgumentException("Each pathCreation allowedAbove entry must be a string");
+            }
+            pathCreationAllowedAbove.add(resolveAllowedAbove(element.getAsString()));
+        }
+        JsonArray pathCreationEntries = pathCreation.getAsJsonArray("transitions");
+        if (pathCreationEntries == null) {
+            throw new IllegalArgumentException("Missing pathCreation transitions array");
+        }
+        Map<Block, PathCreationRule> pathCreationTransitions = new LinkedHashMap<>();
+        for (JsonElement element : pathCreationEntries) {
+            if (!element.isJsonObject()) {
+                throw new IllegalArgumentException("Each path creation transition must be an object");
+            }
+
+            JsonObject object = element.getAsJsonObject();
+            Block from = resolveBlock(requiredString(object, "from"));
+            Block to = resolveBlock(requiredString(object, "to"));
+            int minimumWalks = rangedInt(object, "minimumWalks", 0, 1_000_000);
+            double chance = requiredProbability(object, "chance", false);
+            double chanceIncrease = requiredProbability(object, "chanceIncrease", true);
+            double maxChance = requiredProbability(object, "maxChance", false);
+            double neighborChance = optionalProbability(object, "neighborChance", 0.15, true);
+            if (maxChance < chance) {
+                throw new IllegalArgumentException("Path creation maxChance must be at least chance");
+            }
+
+            PathCreationRule transition = new PathCreationRule(
+                    from, to, minimumWalks, chance, chanceIncrease, maxChance, neighborChance
+            );
+            if (pathCreationTransitions.put(from, transition) != null) {
+                throw new IllegalArgumentException(
+                        "Duplicate path creation transition for " + BuiltInRegistries.BLOCK.getKey(from)
+                );
+            }
+        }
+
+        JsonObject trampling = root.getAsJsonObject("trampling");
+        if (trampling == null) {
+            throw new IllegalArgumentException("Missing trampling object");
+        }
+        boolean tramplingEnabled = !trampling.has("enabled") || trampling.get("enabled").getAsBoolean();
+        JsonArray tramplingEntries = trampling.getAsJsonArray("transitions");
+        if (tramplingEntries == null) {
+            throw new IllegalArgumentException("Missing trampling transitions array");
+        }
+        Map<Block, TramplingRule> tramplingTransitions = new LinkedHashMap<>();
+        for (JsonElement element : tramplingEntries) {
+            if (!element.isJsonObject()) {
+                throw new IllegalArgumentException("Each trampling transition must be an object");
+            }
+
+            JsonObject object = element.getAsJsonObject();
+            Block from = resolveBlock(requiredString(object, "from"));
+            Block to = resolveBlock(requiredString(object, "to"));
+            int minimumWalks = rangedInt(object, "minimumWalks", 0, 1_000_000);
+            double chance = requiredProbability(object, "chance", false);
+            double chanceIncrease = requiredProbability(object, "chanceIncrease", true);
+            double maxChance = requiredProbability(object, "maxChance", false);
+            if (maxChance < chance) {
+                throw new IllegalArgumentException("Trampling maxChance must be at least chance");
+            }
+
+            TramplingRule transition = new TramplingRule(
+                    from, to, minimumWalks, chance, chanceIncrease, maxChance
+            );
+            if (tramplingTransitions.put(from, transition) != null) {
+                throw new IllegalArgumentException(
+                        "Duplicate trampling transition for " + BuiltInRegistries.BLOCK.getKey(from)
+                );
+            }
+        }
 
         JsonArray entries = root.getAsJsonArray("transitions");
         if (entries == null) {
@@ -242,6 +437,11 @@ public final class WildPathsConfig {
                 nearbyScanRadius,
                 nearbyScanDepth,
                 nearbyScanColumns,
+                pathCreationEnabled,
+                List.copyOf(pathCreationAllowedAbove),
+                Map.copyOf(pathCreationTransitions),
+                tramplingEnabled,
+                Map.copyOf(tramplingTransitions),
                 Map.copyOf(transitions)
         );
     }
@@ -429,12 +629,47 @@ public final class WildPathsConfig {
         return object.get(name).getAsString();
     }
 
+    private static double requiredProbability(JsonObject object, String name, boolean allowZero) {
+        if (!object.has(name)) {
+            throw new IllegalArgumentException("Missing " + name);
+        }
+        double value = object.get(name).getAsDouble();
+        if (!Double.isFinite(value) || value < 0.0 || value > 1.0 || (!allowZero && value == 0.0)) {
+            throw new IllegalArgumentException(name + " must be "
+                    + (allowZero ? "between 0 and 1" : "greater than 0 and at most 1"));
+        }
+        return value;
+    }
+
+    private static double optionalProbability(
+            JsonObject object,
+            String name,
+            double fallback,
+            boolean allowZero
+    ) {
+        if (!object.has(name)) {
+            return fallback;
+        }
+        return requiredProbability(object, name, allowZero);
+    }
+
     private static Block resolveBlock(String name) {
         ResourceLocation id = ResourceLocation.tryParse(name);
         if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) {
             throw new IllegalArgumentException("Unknown block: " + name);
         }
         return BuiltInRegistries.BLOCK.get(id);
+    }
+
+    private static AllowedAbove resolveAllowedAbove(String name) {
+        if (name.startsWith("#")) {
+            ResourceLocation id = ResourceLocation.tryParse(name.substring(1));
+            if (id == null) {
+                throw new IllegalArgumentException("Invalid block tag: " + name);
+            }
+            return new AllowedAbove(null, TagKey.create(Registries.BLOCK, id));
+        }
+        return new AllowedAbove(resolveBlock(name), null);
     }
 
     private record Settings(
@@ -444,8 +679,19 @@ public final class WildPathsConfig {
             int nearbyScanRadius,
             int nearbyScanDepth,
             int nearbyScanColumnsPerPlayer,
+            boolean pathCreationEnabled,
+            List<AllowedAbove> pathCreationAllowedAbove,
+            Map<Block, PathCreationRule> pathCreationTransitions,
+            boolean tramplingEnabled,
+            Map<Block, TramplingRule> tramplingTransitions,
             Map<Block, TransitionRule> transitions
     ) {
+    }
+
+    private record AllowedAbove(Block block, TagKey<Block> tag) {
+        private boolean matches(BlockState state) {
+            return block != null ? state.is(block) : state.is(tag);
+        }
     }
 
     private WildPathsConfig() {

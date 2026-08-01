@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.0
+
+- Create configurable paths from repeated player traffic
+- Add the default multi-stage `grass_block` to `dirt` to `dirt_path` progression
+- Add configurable `tall_grass` to `short_grass` to `air` trampling stages
+- Let nearby surface blocks gradually gain configurable wear for more natural paths
+- Add a configurable block and tag whitelist for plants allowed above forming paths
+- Persist walk counts and increasing creation probabilities per block
+- Protect blocks and reset all progress with wool placed directly underneath
+- Add an optional live action-bar debug display for the block a player is looking at
+- Extend `/wildpaths status` and `/wildpaths debug` with path creation details
+
 ## 1.3.0
 
 - Add `/wildpaths reload` for configuration changes without a server restart

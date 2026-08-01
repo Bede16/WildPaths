@@ -10,7 +10,7 @@ displayName="${mod_name}"
 displayURL="https://github.com/Bede16/WildPaths"
 authors="Bede16"
 description='''
-Lets player-used dirt paths recover into dirt after a configurable period of inactivity.
+Creates and recovers natural paths from player traffic, tramples vegetation, and ages exposed blocks through configurable transitions.
 '''
 
 [[dependencies.${mod_id}]]
