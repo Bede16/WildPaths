@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- Add a protected period and increasing decay probability for dirt paths
+- Let exposed cobblestone and stone bricks slowly become mossy during rain
+- Discover matching surface blocks incrementally near active players
+- Persist probability attempts across server restarts
+- Add bounded nearby scanning controls to the JSON5 configuration
+
 ## 1.1.0
 
 - Replace the fixed dirt-path rule with configurable block transitions
