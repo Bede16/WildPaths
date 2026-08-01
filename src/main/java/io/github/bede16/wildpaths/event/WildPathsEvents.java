@@ -7,10 +7,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Blocks;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
 
 public final class WildPathsEvents {
     private static final int PLAYER_SAMPLE_INTERVAL = 20;
@@ -27,15 +27,20 @@ public final class WildPathsEvents {
             return;
         }
 
-        BlockPos pathPos = player.blockPosition().below();
-        if (level.getBlockState(pathPos).is(Blocks.DIRT_PATH)) {
-            WildPathsSavedData.get(level).recordUse(pathPos, level.getGameTime());
+        BlockPos observedPos = player.blockPosition().below();
+        if (WildPathsConfig.find(level.getBlockState(observedPos)) != null) {
+            WildPathsSavedData.get(level).recordUse(observedPos, level.getGameTime());
         }
     }
 
     @SubscribeEvent
+    public void onServerAboutToStart(ServerAboutToStartEvent event) {
+        WildPathsConfig.load();
+    }
+
+    @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
-        int interval = WildPathsConfig.CHECK_INTERVAL.getAsInt();
+        int interval = WildPathsConfig.checkInterval();
         long gameTime = event.getServer().getTickCount();
         if (gameTime % interval != 0) {
             return;
@@ -50,8 +55,7 @@ public final class WildPathsEvents {
             int decayed = data.process(
                     level,
                     level.getGameTime(),
-                    WildPathsConfig.DECAY_TICKS.getAsLong(),
-                    WildPathsConfig.MAX_CHECKS_PER_INTERVAL.getAsInt()
+                    WildPathsConfig.maxChecksPerInterval()
             );
             if (decayed > 0) {
                 WildPaths.LOGGER.debug("Recovered {} paths in {} ({} still tracked)", decayed, level.dimension().location(), data.size());
@@ -60,6 +64,6 @@ public final class WildPathsEvents {
     }
 
     private static boolean isEnabled(ServerLevel level) {
-        return !WildPathsConfig.ONLY_OVERWORLD.getAsBoolean() || level.dimension() == Level.OVERWORLD;
+        return !WildPathsConfig.onlyOverworld() || level.dimension() == Level.OVERWORLD;
     }
 }
