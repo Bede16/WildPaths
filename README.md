@@ -1,10 +1,12 @@
 # Wild Paths
 
-Wild Paths is a lightweight server-side NeoForge mod for Minecraft 1.21.1. Dirt paths that players have used turn back into dirt after a configurable period without further use. Vanilla Minecraft can then grow grass on the dirt when its normal conditions are met.
+Wild Paths is a lightweight server-side NeoForge mod for Minecraft 1.21.1. Configurable blocks that players walk on can change after a period without further use. Vanilla Minecraft can then continue updating the resulting blocks normally.
 
 ## Features
 
-- Tracks only dirt paths that players actually walk on
+- Supports configurable block-to-block transitions
+- Tracks only matching blocks that players actually walk on
+- Supports rain-dependent transitions for exposed blocks
 - Persists tracked positions and timestamps with each world
 - Processes a bounded number of entries per interval to avoid tick-time spikes
 - Never scans chunks and never force-loads unloaded chunks
@@ -19,16 +21,41 @@ Wild Paths is a lightweight server-side NeoForge mod for Minecraft 1.21.1. Dirt 
 
 ## Configuration
 
-NeoForge creates `config/wild_paths-common.toml` after the first launch.
+Wild Paths creates one configuration file, `config/wild_paths.json5`, on the first server start. JSON5 supports comments and trailing commas. The default file is:
 
-| Setting | Default | Meaning |
-| --- | ---: | --- |
-| `decayTicks` | `72000` | Inactivity before decay; 72,000 ticks are three Minecraft days |
-| `checkInterval` | `200` | Ticks between processing passes |
-| `maxChecksPerInterval` | `1024` | Maximum paths checked per pass and dimension |
-| `onlyOverworld` | `false` | Restrict tracking and decay to the Overworld |
+```json5
+{
+  // Limits how much work Wild Paths performs at once.
+  processing: {
+    checkInterval: 200,
+    maxChecksPerInterval: 1024,
+    onlyOverworld: false,
+  },
 
-The configured decay time is a minimum. With very large tracking sets, a path can be converted later because work is intentionally spread across multiple processing passes.
+  // A block is observed only after a player walks on it.
+  "transitions": [
+    {
+      from: "minecraft:dirt_path",
+      to: "minecraft:dirt",
+      ticks: 72000,
+    },
+    {
+      from: "minecraft:cobblestone",
+      to: "minecraft:mossy_cobblestone",
+      ticks: 240000,
+      requiresRain: true,
+    },
+    {
+      from: "minecraft:stone_bricks",
+      to: "minecraft:mossy_stone_bricks",
+      ticks: 240000,
+      requiresRain: true,
+    },
+  ],
+}
+```
+
+Each `from` block may appear only once. `ticks` is the minimum inactivity time. When `requiresRain` is enabled, the transition waits until rain can reach the block. With very large tracking sets, a block can change later because work is intentionally spread across multiple processing passes. Restart the server after editing the JSON5 file.
 
 ## Building
 
