@@ -30,6 +30,9 @@ public final class WildPathsConfig {
                 checkInterval: 200,
                 maxChecksPerInterval: 1024,
                 onlyOverworld: false,
+                nearbyScanRadius: 24,
+                nearbyScanDepth: 6,
+                nearbyScanColumnsPerPlayer: 128,
               },
 
               // A block is observed only after a player walks on it.
@@ -37,25 +40,41 @@ public final class WildPathsConfig {
                 {
                   from: "minecraft:dirt_path",
                   to: "minecraft:dirt",
+                  // One protected hour after the last use, then a roll every five minutes.
                   ticks: 72000,
+                  chanceInterval: 6000,
+                  chance: 0.05,
+                  chanceIncrease: 0.05,
+                  maxChance: 1.0,
+                  resetOnWalk: true,
+                  discoverNearby: true,
                 },
                 {
                   from: "minecraft:cobblestone",
                   to: "minecraft:mossy_cobblestone",
-                  ticks: 240000,
+                  // A small roll for every minute of rain that can reach the block.
+                  ticks: 0,
+                  chanceInterval: 1200,
+                  chance: 0.005,
                   requiresRain: true,
+                  resetOnWalk: false,
+                  discoverNearby: true,
                 },
                 {
                   from: "minecraft:stone_bricks",
                   to: "minecraft:mossy_stone_bricks",
-                  ticks: 240000,
+                  ticks: 0,
+                  chanceInterval: 1200,
+                  chance: 0.005,
                   requiresRain: true,
+                  resetOnWalk: false,
+                  discoverNearby: true,
                 },
               ],
             }
             """;
 
-    private static volatile Settings settings = new Settings(200, 1_024, false, Map.of());
+    private static volatile Settings settings = new Settings(200, 1_024, false, 24, 6, 128, Map.of());
 
     public static synchronized void load() {
         Path configPath = FMLPaths.CONFIGDIR.get().resolve(FILE_NAME);
@@ -88,6 +107,18 @@ public final class WildPathsConfig {
         return settings.onlyOverworld();
     }
 
+    public static int nearbyScanRadius() {
+        return settings.nearbyScanRadius();
+    }
+
+    public static int nearbyScanDepth() {
+        return settings.nearbyScanDepth();
+    }
+
+    public static int nearbyScanColumnsPerPlayer() {
+        return settings.nearbyScanColumnsPerPlayer();
+    }
+
     public static TransitionRule find(BlockState state) {
         return settings.transitions().get(state.getBlock());
     }
@@ -109,6 +140,9 @@ public final class WildPathsConfig {
         int checkInterval = rangedInt(processing, "checkInterval", 1, 72_000);
         int maxChecks = rangedInt(processing, "maxChecksPerInterval", 1, 1_000_000);
         boolean onlyOverworld = processing.has("onlyOverworld") && processing.get("onlyOverworld").getAsBoolean();
+        int nearbyScanRadius = optionalRangedInt(processing, "nearbyScanRadius", 24, 0, 128);
+        int nearbyScanDepth = optionalRangedInt(processing, "nearbyScanDepth", 6, 0, 64);
+        int nearbyScanColumns = optionalRangedInt(processing, "nearbyScanColumnsPerPlayer", 128, 0, 10_000);
 
         JsonArray entries = root.getAsJsonArray("transitions");
         if (entries == null) {
@@ -125,17 +159,55 @@ public final class WildPathsConfig {
             Block from = resolveBlock(requiredString(object, "from"));
             Block to = resolveBlock(requiredString(object, "to"));
             long ticks = object.get("ticks").getAsLong();
+            long chanceInterval = object.has("chanceInterval") ? object.get("chanceInterval").getAsLong() : checkInterval;
+            double chance = object.has("chance") ? object.get("chance").getAsDouble() : 1.0;
+            double chanceIncrease = object.has("chanceIncrease") ? object.get("chanceIncrease").getAsDouble() : 0.0;
+            double maxChance = object.has("maxChance") ? object.get("maxChance").getAsDouble() : 1.0;
             boolean requiresRain = object.has("requiresRain") && object.get("requiresRain").getAsBoolean();
+            boolean resetOnWalk = !object.has("resetOnWalk") || object.get("resetOnWalk").getAsBoolean();
+            boolean discoverNearby = !object.has("discoverNearby") || object.get("discoverNearby").getAsBoolean();
 
-            if (ticks < 1L) {
-                throw new IllegalArgumentException("Transition ticks must be at least 1");
+            if (ticks < 0L) {
+                throw new IllegalArgumentException("Transition ticks must be at least 0");
             }
-            if (transitions.put(from, new TransitionRule(from, to, ticks, requiresRain)) != null) {
+            if (chanceInterval < 1L) {
+                throw new IllegalArgumentException("Transition chanceInterval must be at least 1");
+            }
+            if (!Double.isFinite(chance) || chance <= 0.0 || chance > 1.0) {
+                throw new IllegalArgumentException("Transition chance must be greater than 0 and at most 1");
+            }
+            if (!Double.isFinite(chanceIncrease) || chanceIncrease < 0.0 || chanceIncrease > 1.0) {
+                throw new IllegalArgumentException("Transition chanceIncrease must be between 0 and 1");
+            }
+            if (!Double.isFinite(maxChance) || maxChance < chance || maxChance > 1.0) {
+                throw new IllegalArgumentException("Transition maxChance must be at least chance and at most 1");
+            }
+            TransitionRule transition = new TransitionRule(
+                    from,
+                    to,
+                    ticks,
+                    chanceInterval,
+                    chance,
+                    chanceIncrease,
+                    maxChance,
+                    requiresRain,
+                    resetOnWalk,
+                    discoverNearby
+            );
+            if (transitions.put(from, transition) != null) {
                 throw new IllegalArgumentException("Duplicate transition for " + BuiltInRegistries.BLOCK.getKey(from));
             }
         }
 
-        return new Settings(checkInterval, maxChecks, onlyOverworld, Map.copyOf(transitions));
+        return new Settings(
+                checkInterval,
+                maxChecks,
+                onlyOverworld,
+                nearbyScanRadius,
+                nearbyScanDepth,
+                nearbyScanColumns,
+                Map.copyOf(transitions)
+        );
     }
 
     private static String readAll(Reader source) {
@@ -257,6 +329,17 @@ public final class WildPathsConfig {
         return value;
     }
 
+    private static int optionalRangedInt(JsonObject object, String name, int fallback, int minimum, int maximum) {
+        if (!object.has(name)) {
+            return fallback;
+        }
+        int value = object.get(name).getAsInt();
+        if (value < minimum || value > maximum) {
+            throw new IllegalArgumentException(name + " must be between " + minimum + " and " + maximum);
+        }
+        return value;
+    }
+
     private static String requiredString(JsonObject object, String name) {
         if (!object.has(name) || !object.get(name).isJsonPrimitive()) {
             throw new IllegalArgumentException("Missing or invalid " + name);
@@ -276,6 +359,9 @@ public final class WildPathsConfig {
             int checkInterval,
             int maxChecksPerInterval,
             boolean onlyOverworld,
+            int nearbyScanRadius,
+            int nearbyScanDepth,
+            int nearbyScanColumnsPerPlayer,
             Map<Block, TransitionRule> transitions
     ) {
     }
