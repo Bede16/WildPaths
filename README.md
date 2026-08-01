@@ -27,6 +27,8 @@ Wild Paths creates one configuration file, `config/wild_paths.json5`, on the fir
 
 ```json5
 {
+  configVersion: 2,
+
   // Limits how much work Wild Paths performs at once.
   processing: {
     checkInterval: 200,
@@ -80,6 +82,8 @@ Each `from` block may appear only once. `ticks` is the protected time before the
 
 `discoverNearby` lets the bounded surface scanner find blocks without requiring a player to step directly on them. Each second it checks at most `nearbyScanColumnsPerPlayer` columns within `nearbyScanRadius`, and only `nearbyScanDepth` blocks below the surface. It skips unloaded chunks. Setting the column count to `0` disables nearby discovery. With very large tracking sets, a block can change later because work is intentionally spread across multiple processing passes. Restart the server after editing the JSON5 file.
 
+`configVersion` is managed by Wild Paths. When a newer mod release needs a newer configuration structure, the file is upgraded automatically on server start. Existing values and custom transitions are retained, and the original file is saved beside it as `wild_paths.json5.before-vN.backup`. A newer config is never automatically downgraded by an older mod release.
+
 ## Building
 
 ```text
@@ -88,6 +92,9 @@ gradlew.bat build
 
 The finished mod JAR is written to `build/libs/`.
 
+Successful builds on `main` automatically create a tagged GitHub Release when the `mod_version` has not been published before. The matching mod JAR is attached directly to that release. Further commits with the same version leave the existing release unchanged.
+
 ## License
 
 Wild Paths is available under the GNU General Public License v3.0.
+
