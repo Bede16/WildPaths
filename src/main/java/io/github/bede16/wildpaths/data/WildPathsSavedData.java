@@ -8,6 +8,7 @@ import io.github.bede16.wildpaths.config.WildPathsConfig;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.SectionPos;
@@ -30,6 +31,8 @@ public final class WildPathsSavedData extends SavedData {
     private static final String WEAR_POSITIONS_TAG = "WearPositions";
     private static final String WEAR_WALKS_TAG = "WearWalks";
     private static final String WEAR_FAILED_ATTEMPTS_TAG = "WearFailedAttempts";
+    private static final String WEAR_LAST_TRAFFIC_TAG = "WearLastTraffic";
+    private static final String WEAR_LAST_RECOVERY_TAG = "WearLastRecovery";
 
     private final Long2LongOpenHashMap lastUses = new Long2LongOpenHashMap();
     private final Long2LongOpenHashMap lastAttempts = new Long2LongOpenHashMap();
@@ -37,6 +40,10 @@ public final class WildPathsSavedData extends SavedData {
     private final LongArrayFIFOQueue checkQueue = new LongArrayFIFOQueue();
     private final Long2IntOpenHashMap wearWalks = new Long2IntOpenHashMap();
     private final Long2IntOpenHashMap wearFailedAttempts = new Long2IntOpenHashMap();
+    private final Long2LongOpenHashMap wearLastTraffic = new Long2LongOpenHashMap();
+    private final Long2LongOpenHashMap wearLastRecovery = new Long2LongOpenHashMap();
+    private final LongArrayFIFOQueue wearQueue = new LongArrayFIFOQueue();
+    private final LongOpenHashSet queuedWear = new LongOpenHashSet();
 
     public static WildPathsSavedData get(ServerLevel level) {
         return level.getDataStorage().computeIfAbsent(
@@ -73,6 +80,8 @@ public final class WildPathsSavedData extends SavedData {
         long[] wearPositions = tag.getLongArray(WEAR_POSITIONS_TAG);
         int[] wearWalks = tag.getIntArray(WEAR_WALKS_TAG);
         int[] wearFailures = tag.getIntArray(WEAR_FAILED_ATTEMPTS_TAG);
+        long[] wearLastTraffic = tag.getLongArray(WEAR_LAST_TRAFFIC_TAG);
+        long[] wearLastRecovery = tag.getLongArray(WEAR_LAST_RECOVERY_TAG);
         int wearCount = Math.min(wearPositions.length, wearWalks.length);
         for (int index = 0; index < wearCount; index++) {
             long packedPos = wearPositions[index];
@@ -81,6 +90,13 @@ public final class WildPathsSavedData extends SavedData {
                     packedPos,
                     index < wearFailures.length ? Math.max(0, wearFailures[index]) : 0
             );
+            if (index < wearLastTraffic.length) {
+                data.wearLastTraffic.put(packedPos, wearLastTraffic[index]);
+            }
+            if (index < wearLastRecovery.length) {
+                data.wearLastRecovery.put(packedPos, wearLastRecovery[index]);
+            }
+            data.enqueueWear(packedPos);
         }
         if (wearPositions.length != wearWalks.length) {
             WildPaths.LOGGER.warn(
@@ -126,6 +142,8 @@ public final class WildPathsSavedData extends SavedData {
         failedAttempts.remove(packedPos);
         wearWalks.remove(packedPos);
         wearFailedAttempts.remove(packedPos);
+        wearLastTraffic.remove(packedPos);
+        wearLastRecovery.remove(packedPos);
         if (changed) {
             setDirty();
         }
@@ -145,8 +163,7 @@ public final class WildPathsSavedData extends SavedData {
         }
 
         long packedPos = pos.asLong();
-        int walks = wearWalks.get(packedPos) + 1;
-        wearWalks.put(packedPos, walks);
+        int walks = recordWear(packedPos, level.getGameTime());
 
         if (walks <= transition.minimumWalks()) {
             setDirty();
@@ -202,8 +219,7 @@ public final class WildPathsSavedData extends SavedData {
             return false;
         }
 
-        int walks = wearWalks.get(packedPos) + 1;
-        wearWalks.put(packedPos, walks);
+        int walks = recordWear(packedPos, level.getGameTime());
         if (walks <= transition.minimumWalks()) {
             setDirty();
             return false;
@@ -293,6 +309,7 @@ public final class WildPathsSavedData extends SavedData {
                 setDirty();
             }
         }
+        processWearRecovery(level, gameTime, maxChecks);
         return decayed;
     }
 
@@ -324,6 +341,11 @@ public final class WildPathsSavedData extends SavedData {
         return new WearEntry(wearWalks.get(packedPos), wearFailedAttempts.get(packedPos));
     }
 
+    public WearEntry wearEntry(ServerLevel level, BlockPos pos) {
+        recoverWear(pos.asLong(), level.getGameTime());
+        return wearEntry(pos);
+    }
+
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
         long[] positions = new long[lastUses.size()];
@@ -349,17 +371,23 @@ public final class WildPathsSavedData extends SavedData {
         long[] wearPositions = new long[wearWalks.size()];
         int[] walks = new int[wearWalks.size()];
         int[] wearFailures = new int[wearWalks.size()];
+        long[] wearTrafficTimes = new long[wearWalks.size()];
+        long[] wearRecoveryTimes = new long[wearWalks.size()];
         index = 0;
         for (Long2IntOpenHashMap.Entry entry : wearWalks.long2IntEntrySet()) {
             long packedPos = entry.getLongKey();
             wearPositions[index] = packedPos;
             walks[index] = entry.getIntValue();
             wearFailures[index] = wearFailedAttempts.get(packedPos);
+            wearTrafficTimes[index] = wearLastTraffic.getOrDefault(packedPos, 0L);
+            wearRecoveryTimes[index] = wearLastRecovery.getOrDefault(packedPos, 0L);
             index++;
         }
         tag.putLongArray(WEAR_POSITIONS_TAG, wearPositions);
         tag.putIntArray(WEAR_WALKS_TAG, walks);
         tag.putIntArray(WEAR_FAILED_ATTEMPTS_TAG, wearFailures);
+        tag.putLongArray(WEAR_LAST_TRAFFIC_TAG, wearTrafficTimes);
+        tag.putLongArray(WEAR_LAST_RECOVERY_TAG, wearRecoveryTimes);
         return tag;
     }
 
@@ -373,7 +401,112 @@ public final class WildPathsSavedData extends SavedData {
     private void removeWear(long packedPos) {
         wearWalks.remove(packedPos);
         wearFailedAttempts.remove(packedPos);
+        wearLastTraffic.remove(packedPos);
+        wearLastRecovery.remove(packedPos);
         setDirty();
+    }
+
+    private int recordWear(long packedPos, long gameTime) {
+        recoverWear(packedPos, gameTime);
+        if (!wearWalks.containsKey(packedPos)) {
+            enqueueWear(packedPos);
+        }
+        int walks = wearWalks.get(packedPos) + 1;
+        wearWalks.put(packedPos, walks);
+        wearLastTraffic.put(packedPos, gameTime);
+        wearLastRecovery.put(packedPos, gameTime);
+        setDirty();
+        return walks;
+    }
+
+    private void processWearRecovery(ServerLevel level, long gameTime, int maxChecks) {
+        int checks = Math.min(maxChecks, wearQueue.size());
+        for (int index = 0; index < checks; index++) {
+            long packedPos = wearQueue.dequeueLong();
+            queuedWear.remove(packedPos);
+            if (!wearWalks.containsKey(packedPos)) {
+                continue;
+            }
+
+            BlockPos pos = BlockPos.of(packedPos);
+            if (level.getChunkSource().getChunkNow(
+                    SectionPos.blockToSectionCoord(pos.getX()),
+                    SectionPos.blockToSectionCoord(pos.getZ())
+            ) == null) {
+                enqueueWear(packedPos);
+                continue;
+            }
+
+            BlockState state = level.getBlockState(pos);
+            PathCreationRule pathRule = WildPathsConfig.findPathCreation(state);
+            TramplingRule tramplingRule = WildPathsConfig.findTrampling(state);
+            boolean protectedByWool = pathRule != null
+                    ? isProtected(level, pos)
+                    : tramplingRule != null && isProtected(level, pos.below());
+            if (protectedByWool || (pathRule == null && tramplingRule == null)) {
+                removeWear(packedPos);
+                continue;
+            }
+
+            recoverWear(packedPos, gameTime);
+            if (wearWalks.containsKey(packedPos)) {
+                enqueueWear(packedPos);
+            }
+        }
+    }
+
+    private void recoverWear(long packedPos, long gameTime) {
+        if (!wearWalks.containsKey(packedPos) || !WildPathsConfig.wearRecoveryEnabled()) {
+            return;
+        }
+
+        if (!wearLastTraffic.containsKey(packedPos)) {
+            wearLastTraffic.put(packedPos, gameTime);
+            wearLastRecovery.put(packedPos, gameTime);
+            setDirty();
+            return;
+        }
+
+        long lastTraffic = wearLastTraffic.get(packedPos);
+        if (gameTime < lastTraffic) {
+            wearLastTraffic.put(packedPos, gameTime);
+            wearLastRecovery.put(packedPos, gameTime);
+            setDirty();
+            return;
+        }
+
+        long recoveryStart = lastTraffic + WildPathsConfig.wearRecoveryDelayTicks();
+        long lastRecovery = Math.max(wearLastRecovery.getOrDefault(packedPos, lastTraffic), recoveryStart);
+        long elapsed = gameTime - lastRecovery;
+        long intervals = elapsed / WildPathsConfig.wearRecoveryIntervalTicks();
+        if (intervals <= 0L) {
+            return;
+        }
+
+        long recoveredLong = intervals > Integer.MAX_VALUE / WildPathsConfig.wearRecoveryAmountPerInterval()
+                ? Integer.MAX_VALUE
+                : intervals * WildPathsConfig.wearRecoveryAmountPerInterval();
+        int recovered = (int) recoveredLong;
+        int walks = Math.max(0, wearWalks.get(packedPos) - recovered);
+        int failures = Math.max(0, wearFailedAttempts.get(packedPos) - recovered);
+        if (walks == 0) {
+            removeWear(packedPos);
+            return;
+        }
+
+        wearWalks.put(packedPos, walks);
+        wearFailedAttempts.put(packedPos, failures);
+        wearLastRecovery.put(
+                packedPos,
+                lastRecovery + intervals * WildPathsConfig.wearRecoveryIntervalTicks()
+        );
+        setDirty();
+    }
+
+    private void enqueueWear(long packedPos) {
+        if (queuedWear.add(packedPos)) {
+            wearQueue.enqueue(packedPos);
+        }
     }
 
     public record TrackedEntry(long lastUse, long lastAttempt, int failedAttempts) {

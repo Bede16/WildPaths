@@ -16,13 +16,14 @@ cobblestone  --rain--> mossy_cobblestone
 stone_bricks --rain--> mossy_stone_bricks
 ```
 
-Every player crossing contributes to the block being used. Walking back and forth and landing after a jump count again, while standing still does not. Each stage has a protected number of crossings followed by an increasing transition probability. Strong traffic can also give nearby surface blocks a smaller amount of wear, producing irregular, natural-looking path edges. Unused dirt paths later recover through the independent timed-transition system.
+Every player crossing contributes to the block being used. Walking back and forth and landing after a jump count again, while standing still does not. Each stage has a protected number of crossings followed by an increasing transition probability. Strong traffic can also give nearby surface blocks a smaller amount of wear, producing irregular, natural-looking path edges. Unfinished wear on both ground and plants slowly recovers after traffic stops. Unused dirt paths later recover through the independent timed-transition system.
 
 ## Features
 
 - Supports configurable block-to-block transitions
 - Creates configurable, multi-stage paths from repeated player traffic
 - Tramples tall grass into short grass and short grass into air in configurable stages
+- Gradually removes unfinished ground and plant wear after a configurable quiet period
 - Discovers matching surface blocks incrementally around players
 - Resets configurable transitions when a player walks on the block
 - Supports increasing transition probabilities after a protected period
@@ -55,7 +56,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
 
 ```json5
 {
-  configVersion: 3,
+  configVersion: 4,
 
   // Limits how much work Wild Paths performs at once.
   processing: {
@@ -65,6 +66,15 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
     nearbyScanRadius: 24,
     nearbyScanDepth: 6,
     nearbyScanColumnsPerPlayer: 128,
+  },
+
+  // Unfinished traffic wear slowly disappears when nobody uses the block.
+  // 24000 ticks are one Minecraft day while the dimension is running.
+  wearRecovery: {
+    enabled: true,
+    delayTicks: 24000,
+    intervalTicks: 1200,
+    amountPerInterval: 1,
   },
 
   // Repeated player traffic can form paths in multiple configurable stages.
@@ -170,6 +180,8 @@ Each `from` block may appear only once. `ticks` is the protected time before the
 Path creation requires air above the affected block unless the block above matches `allowedAbove`. The whitelist accepts exact block IDs and block tags prefixed with `#`. It is empty by default; commented examples for flowers, grass, ferns, and dead bushes can be enabled individually. Other plants or modded blocks can be added without changing the mod.
 
 `trampling.transitions` uses the same protected-walk and increasing-probability model, but only for blocks a player directly moves through. The defaults produce `tall_grass` -> `short_grass` -> `air`; counts reset between both stages, tall grass's upper half is removed correctly, and neighboring wear never affects plants. Once the plant is gone, later traffic can begin wearing the ground underneath. The wool block underneath that ground protects both the plant and every ground stage.
+
+`wearRecovery` applies to unfinished path-creation and plant-trampling progress. After `delayTicks` without new traffic, `amountPerInterval` recorded walks and failed probability rolls are removed every `intervalTicks`. New traffic restarts the quiet period. Reaching zero removes the saved entry completely. A transition that already happened is not reversed: dirt remains dirt and short grass remains short grass, while vanilla Minecraft may still update suitable blocks normally. Set `enabled` to `false` to keep partial wear indefinitely.
 
 For every real crossing, each of the eight horizontal neighboring surface blocks independently receives one additional wear point with `neighborChance`. The search follows terrain one block upward or downward, never loads chunks, and still respects each neighbor's own `minimumWalks`, probability progression, and wool protection. Set `neighborChance` to `0.0` to disable spreading for a rule.
 

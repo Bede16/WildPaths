@@ -267,7 +267,7 @@ public final class WildPathsCommands {
             String blockName,
             PathCreationRule transition
     ) {
-        WildPathsSavedData.WearEntry entry = WildPathsSavedData.get(level).wearEntry(pos);
+        WildPathsSavedData.WearEntry entry = WildPathsSavedData.get(level).wearEntry(level, pos);
         int walks = entry == null ? 0 : entry.walks();
         int failures = entry == null ? 0 : entry.failedAttempts();
         int protectedWalks = Math.max(0, transition.minimumWalks() - walks);
@@ -308,7 +308,7 @@ public final class WildPathsCommands {
             String blockName,
             TramplingRule transition
     ) {
-        WildPathsSavedData.WearEntry entry = WildPathsSavedData.get(level).wearEntry(pos);
+        WildPathsSavedData.WearEntry entry = WildPathsSavedData.get(level).wearEntry(level, pos);
         int walks = entry == null ? 0 : entry.walks();
         int failures = entry == null ? 0 : entry.failedAttempts();
         int protectedWalks = Math.max(0, transition.minimumWalks() - walks);
@@ -343,7 +343,7 @@ public final class WildPathsCommands {
                 return Component.literal("Wild Paths | " + blockName + " | protected by wool");
             }
 
-            WildPathsSavedData.WearEntry entry = WildPathsSavedData.get(level).wearEntry(tramplingPos);
+            WildPathsSavedData.WearEntry entry = WildPathsSavedData.get(level).wearEntry(level, tramplingPos);
             int walks = entry == null ? 0 : entry.walks();
             int failures = entry == null ? 0 : entry.failedAttempts();
             int remaining = Math.max(0, trampling.minimumWalks() - walks);
@@ -376,7 +376,7 @@ public final class WildPathsCommands {
                         "Wild Paths | " + blockName + " | creation blocked by " + aboveName
                 );
             }
-            WildPathsSavedData.WearEntry entry = WildPathsSavedData.get(level).wearEntry(pos);
+            WildPathsSavedData.WearEntry entry = WildPathsSavedData.get(level).wearEntry(level, pos);
             int walks = entry == null ? 0 : entry.walks();
             int failures = entry == null ? 0 : entry.failedAttempts();
             int remaining = Math.max(0, pathCreation.minimumWalks() - walks);

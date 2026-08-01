@@ -31,12 +31,12 @@ import java.util.Map;
 /** Loads all Wild Paths settings from one JSON5 file. */
 public final class WildPathsConfig {
     public static final String FILE_NAME = "wild_paths.json5";
-    private static final int CURRENT_CONFIG_VERSION = 3;
+    private static final int CURRENT_CONFIG_VERSION = 4;
     private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
 
     private static final String DEFAULT_JSON5 = """
             {
-              configVersion: 3,
+              configVersion: 4,
 
               // Limits how much work Wild Paths performs at once.
               processing: {
@@ -46,6 +46,15 @@ public final class WildPathsConfig {
                 nearbyScanRadius: 24,
                 nearbyScanDepth: 6,
                 nearbyScanColumnsPerPlayer: 128,
+              },
+
+              // Unfinished traffic wear slowly disappears when nobody uses the block.
+              // 24000 ticks are one Minecraft day while the dimension is running.
+              wearRecovery: {
+                enabled: true,
+                delayTicks: 24000,
+                intervalTicks: 1200,
+                amountPerInterval: 1,
               },
 
               // Repeated player traffic can form paths in multiple configurable stages.
@@ -146,7 +155,9 @@ public final class WildPathsConfig {
             """;
 
     private static volatile Settings settings = new Settings(
-            200, 1_024, false, 24, 6, 128, true, List.of(), Map.of(), true, Map.of(), Map.of()
+            200, 1_024, false, 24, 6, 128,
+            true, 24_000L, 1_200L, 1,
+            true, List.of(), Map.of(), true, Map.of(), Map.of()
     );
 
     public static synchronized boolean load() {
@@ -215,6 +226,22 @@ public final class WildPathsConfig {
 
     public static int nearbyScanColumnsPerPlayer() {
         return settings.nearbyScanColumnsPerPlayer();
+    }
+
+    public static boolean wearRecoveryEnabled() {
+        return settings.wearRecoveryEnabled();
+    }
+
+    public static long wearRecoveryDelayTicks() {
+        return settings.wearRecoveryDelayTicks();
+    }
+
+    public static long wearRecoveryIntervalTicks() {
+        return settings.wearRecoveryIntervalTicks();
+    }
+
+    public static int wearRecoveryAmountPerInterval() {
+        return settings.wearRecoveryAmountPerInterval();
     }
 
     public static int transitionCount() {
@@ -290,6 +317,22 @@ public final class WildPathsConfig {
         int nearbyScanRadius = optionalRangedInt(processing, "nearbyScanRadius", 24, 0, 128);
         int nearbyScanDepth = optionalRangedInt(processing, "nearbyScanDepth", 6, 0, 64);
         int nearbyScanColumns = optionalRangedInt(processing, "nearbyScanColumnsPerPlayer", 128, 0, 10_000);
+
+        JsonObject wearRecovery = root.getAsJsonObject("wearRecovery");
+        if (wearRecovery == null) {
+            throw new IllegalArgumentException("Missing wearRecovery object");
+        }
+        boolean wearRecoveryEnabled = !wearRecovery.has("enabled")
+                || wearRecovery.get("enabled").getAsBoolean();
+        long wearRecoveryDelayTicks = rangedLong(
+                wearRecovery, "delayTicks", 0L, 2_147_483_647L
+        );
+        long wearRecoveryIntervalTicks = rangedLong(
+                wearRecovery, "intervalTicks", 1L, 2_147_483_647L
+        );
+        int wearRecoveryAmount = rangedInt(
+                wearRecovery, "amountPerInterval", 1, 1_000_000
+        );
 
         JsonObject pathCreation = root.getAsJsonObject("pathCreation");
         if (pathCreation == null) {
@@ -437,6 +480,10 @@ public final class WildPathsConfig {
                 nearbyScanRadius,
                 nearbyScanDepth,
                 nearbyScanColumns,
+                wearRecoveryEnabled,
+                wearRecoveryDelayTicks,
+                wearRecoveryIntervalTicks,
+                wearRecoveryAmount,
                 pathCreationEnabled,
                 List.copyOf(pathCreationAllowedAbove),
                 Map.copyOf(pathCreationTransitions),
@@ -641,6 +688,17 @@ public final class WildPathsConfig {
         return value;
     }
 
+    private static long rangedLong(JsonObject object, String name, long minimum, long maximum) {
+        if (!object.has(name)) {
+            throw new IllegalArgumentException("Missing " + name);
+        }
+        long value = object.get(name).getAsLong();
+        if (value < minimum || value > maximum) {
+            throw new IllegalArgumentException(name + " must be between " + minimum + " and " + maximum);
+        }
+        return value;
+    }
+
     private static double optionalProbability(
             JsonObject object,
             String name,
@@ -679,6 +737,10 @@ public final class WildPathsConfig {
             int nearbyScanRadius,
             int nearbyScanDepth,
             int nearbyScanColumnsPerPlayer,
+            boolean wearRecoveryEnabled,
+            long wearRecoveryDelayTicks,
+            long wearRecoveryIntervalTicks,
+            int wearRecoveryAmountPerInterval,
             boolean pathCreationEnabled,
             List<AllowedAbove> pathCreationAllowedAbove,
             Map<Block, PathCreationRule> pathCreationTransitions,

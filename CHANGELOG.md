@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.1
+
+- Let unfinished path-creation wear recover after a configurable quiet period
+- Apply the same gradual recovery to tall- and short-grass trampling progress
+- Clear both recorded walks and accumulated failed probability rolls during recovery
+
 ## 2.0.0
 
 - Create configurable paths from repeated player traffic
