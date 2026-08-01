@@ -41,10 +41,6 @@ public final class WildPathsCommands {
                         .then(Commands.literal("status")
                                 .executes(context -> status(context.getSource())))
                         .then(Commands.literal("debug")
-                                .then(Commands.literal("on")
-                                        .executes(context -> setDebugOverlay(context.getSource(), true)))
-                                .then(Commands.literal("off")
-                                        .executes(context -> setDebugOverlay(context.getSource(), false)))
                                 .then(Commands.argument("enabled", BoolArgumentType.bool())
                                         .executes(context -> setDebugOverlay(
                                                 context.getSource(),
@@ -334,80 +330,68 @@ public final class WildPathsCommands {
 
     private static Component debugOverlayText(ServerLevel level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
-        String blockName = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
 
         TramplingRule trampling = WildPathsConfig.findTrampling(state);
         if (trampling != null) {
             BlockPos tramplingPos = normalizeTramplingPos(pos, state);
             if (WildPathsSavedData.isProtected(level, tramplingPos.below())) {
-                return Component.literal("Wild Paths | " + blockName + " | protected by wool");
+                return Component.literal("WP | " + shortBlockName(state) + " | wool protected");
             }
 
             WildPathsSavedData.WearEntry entry = WildPathsSavedData.get(level).wearEntry(level, tramplingPos);
             int walks = entry == null ? 0 : entry.walks();
             int failures = entry == null ? 0 : entry.failedAttempts();
-            int remaining = Math.max(0, trampling.minimumWalks() - walks);
             double chance = Math.min(
                     trampling.maxChance(),
                     trampling.chance() + failures * trampling.chanceIncrease()
             );
-            return Component.literal(String.format(
-                    Locale.ROOT,
-                    "Wild Paths | trample %s -> %s | walks %d | protected %d | chance %.2f%%",
-                    blockName,
-                    BuiltInRegistries.BLOCK.getKey(trampling.to()),
+            return compactWearOverlay(
+                    shortBlockName(state),
+                    shortBlockName(trampling.to().defaultBlockState()),
                     walks,
-                    remaining,
-                    chance * 100.0
-            ));
+                    trampling.minimumWalks(),
+                    chance
+            );
         }
 
         if (WildPathsSavedData.isProtected(level, pos)) {
-            return Component.literal("Wild Paths | " + blockName + " | protected by wool");
+            return Component.literal("WP | " + shortBlockName(state) + " | wool protected");
         }
 
         PathCreationRule pathCreation = WildPathsConfig.findPathCreation(state);
         if (pathCreation != null) {
             if (!WildPathsConfig.isPathCreationSpaceAllowed(level, pos)) {
-                String aboveName = BuiltInRegistries.BLOCK.getKey(
-                        level.getBlockState(pos.above()).getBlock()
-                ).toString();
-                return Component.literal(
-                        "Wild Paths | " + blockName + " | creation blocked by " + aboveName
-                );
+                return Component.literal("WP | " + shortBlockName(state) + " | blocked: "
+                        + shortBlockName(level.getBlockState(pos.above())));
             }
             WildPathsSavedData.WearEntry entry = WildPathsSavedData.get(level).wearEntry(level, pos);
             int walks = entry == null ? 0 : entry.walks();
             int failures = entry == null ? 0 : entry.failedAttempts();
-            int remaining = Math.max(0, pathCreation.minimumWalks() - walks);
             double chance = Math.min(
                     pathCreation.maxChance(),
                     pathCreation.chance() + failures * pathCreation.chanceIncrease()
             );
-            return Component.literal(String.format(
-                    Locale.ROOT,
-                    "Wild Paths | %s -> %s | walks %d | protected %d | chance %.2f%% | neighbor %.2f%%",
-                    blockName,
-                    BuiltInRegistries.BLOCK.getKey(pathCreation.to()),
+            return compactWearOverlay(
+                    shortBlockName(state),
+                    shortBlockName(pathCreation.to().defaultBlockState()),
                     walks,
-                    remaining,
-                    chance * 100.0,
-                    pathCreation.neighborChance() * 100.0
-            ));
+                    pathCreation.minimumWalks(),
+                    chance
+            );
         }
 
         TransitionRule transition = WildPathsConfig.find(state);
         if (transition == null) {
-            return Component.literal("Wild Paths | " + blockName + " | no configured rule");
+            return Component.literal("WP | " + shortBlockName(state) + " | no rule");
         }
 
         WildPathsSavedData.TrackedEntry entry = WildPathsSavedData.get(level).trackedEntry(pos);
         if (entry == null) {
             return Component.literal(String.format(
                     Locale.ROOT,
-                    "Wild Paths | %s -> %s | not tracked",
-                    blockName,
-                    BuiltInRegistries.BLOCK.getKey(transition.to())
+                    "WP | %s → %s | not tracked",
+                    shortBlockName(state),
+                    shortBlockName(transition.to().defaultBlockState())
             ));
         }
 
@@ -418,19 +402,56 @@ public final class WildPathsCommands {
                 transition.maxChance(),
                 transition.chance() + entry.failedAttempts() * transition.chanceIncrease()
         );
+        String timer = protectedTicks > 0L
+                ? "safe " + ticksToSeconds(protectedTicks) + "s"
+                : "next " + ticksToSeconds(nextAttemptTicks) + "s";
         String rain = transition.requiresRain()
-                ? (level.isRainingAt(pos.above()) ? "rain yes" : "rain no")
-                : "rain n/a";
+                ? (level.isRainingAt(pos.above()) ? " | rain" : " | dry")
+                : "";
         return Component.literal(String.format(
                 Locale.ROOT,
-                "Wild Paths | %s -> %s | protected %dt | next %dt | chance %.2f%% | %s",
-                blockName,
-                BuiltInRegistries.BLOCK.getKey(transition.to()),
-                protectedTicks,
-                nextAttemptTicks,
+                "WP | %s → %s | %s | %.0f%%%s",
+                shortBlockName(state),
+                shortBlockName(transition.to().defaultBlockState()),
+                timer,
                 chance * 100.0,
                 rain
         ));
+    }
+
+    private static Component compactWearOverlay(
+            String from,
+            String to,
+            int walks,
+            int minimumWalks,
+            double chance
+    ) {
+        if (walks <= minimumWalks) {
+            return Component.literal(String.format(
+                    Locale.ROOT,
+                    "WP | %s → %s | %d/%d | protected",
+                    from,
+                    to,
+                    walks,
+                    minimumWalks
+            ));
+        }
+        return Component.literal(String.format(
+                Locale.ROOT,
+                "WP | %s → %s | %d walks | %.0f%%",
+                from,
+                to,
+                walks,
+                chance * 100.0
+        ));
+    }
+
+    private static String shortBlockName(BlockState state) {
+        return BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath();
+    }
+
+    private static long ticksToSeconds(long ticks) {
+        return (ticks + 19L) / 20L;
     }
 
     private static boolean isEnabled(ServerLevel level) {

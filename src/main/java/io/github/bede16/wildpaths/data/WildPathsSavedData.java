@@ -28,6 +28,8 @@ public final class WildPathsSavedData extends SavedData {
     private static final String LAST_USES_TAG = "LastUses";
     private static final String LAST_ATTEMPTS_TAG = "LastAttempts";
     private static final String FAILED_ATTEMPTS_TAG = "FailedAttempts";
+    private static final String LAST_WET_TIMES_TAG = "LastWetTimes";
+    private static final String LAST_DRYING_TIMES_TAG = "LastDryingTimes";
     private static final String WEAR_POSITIONS_TAG = "WearPositions";
     private static final String WEAR_WALKS_TAG = "WearWalks";
     private static final String WEAR_FAILED_ATTEMPTS_TAG = "WearFailedAttempts";
@@ -37,6 +39,8 @@ public final class WildPathsSavedData extends SavedData {
     private final Long2LongOpenHashMap lastUses = new Long2LongOpenHashMap();
     private final Long2LongOpenHashMap lastAttempts = new Long2LongOpenHashMap();
     private final Long2IntOpenHashMap failedAttempts = new Long2IntOpenHashMap();
+    private final Long2LongOpenHashMap lastWetTimes = new Long2LongOpenHashMap();
+    private final Long2LongOpenHashMap lastDryingTimes = new Long2LongOpenHashMap();
     private final LongArrayFIFOQueue checkQueue = new LongArrayFIFOQueue();
     private final Long2IntOpenHashMap wearWalks = new Long2IntOpenHashMap();
     private final Long2IntOpenHashMap wearFailedAttempts = new Long2IntOpenHashMap();
@@ -58,6 +62,8 @@ public final class WildPathsSavedData extends SavedData {
         long[] lastUses = tag.getLongArray(LAST_USES_TAG);
         long[] lastAttempts = tag.getLongArray(LAST_ATTEMPTS_TAG);
         int[] failedAttempts = tag.getIntArray(FAILED_ATTEMPTS_TAG);
+        long[] lastWetTimes = tag.getLongArray(LAST_WET_TIMES_TAG);
+        long[] lastDryingTimes = tag.getLongArray(LAST_DRYING_TIMES_TAG);
         int count = Math.min(positions.length, lastUses.length);
 
         for (int index = 0; index < count; index++) {
@@ -66,6 +72,12 @@ public final class WildPathsSavedData extends SavedData {
             data.lastUses.put(packedPos, lastUse);
             data.lastAttempts.put(packedPos, index < lastAttempts.length ? lastAttempts[index] : lastUse);
             data.failedAttempts.put(packedPos, index < failedAttempts.length ? failedAttempts[index] : 0);
+            if (index < lastWetTimes.length) {
+                data.lastWetTimes.put(packedPos, lastWetTimes[index]);
+            }
+            if (index < lastDryingTimes.length) {
+                data.lastDryingTimes.put(packedPos, lastDryingTimes[index]);
+            }
             data.checkQueue.enqueue(packedPos);
         }
 
@@ -140,6 +152,8 @@ public final class WildPathsSavedData extends SavedData {
         lastUses.remove(packedPos);
         lastAttempts.remove(packedPos);
         failedAttempts.remove(packedPos);
+        lastWetTimes.remove(packedPos);
+        lastDryingTimes.remove(packedPos);
         wearWalks.remove(packedPos);
         wearFailedAttempts.remove(packedPos);
         wearLastTraffic.remove(packedPos);
@@ -280,13 +294,23 @@ public final class WildPathsSavedData extends SavedData {
                 continue;
             }
 
-            if (gameTime - lastUses.get(packedPos) < transition.ticks()
-                    || gameTime - lastAttempts.get(packedPos) < transition.chanceInterval()) {
+            if (gameTime - lastUses.get(packedPos) < transition.ticks()) {
                 checkQueue.enqueue(packedPos);
                 continue;
             }
 
-            if (transition.requiresRain() && !level.isRainingAt(pos.above())) {
+            if (transition.requiresRain()) {
+                if (!level.isRainingAt(pos.above())) {
+                    dryTrackedBlock(packedPos, gameTime, transition);
+                    checkQueue.enqueue(packedPos);
+                    continue;
+                }
+                lastWetTimes.put(packedPos, gameTime);
+                lastDryingTimes.put(packedPos, gameTime);
+                setDirty();
+            }
+
+            if (gameTime - lastAttempts.get(packedPos) < transition.chanceInterval()) {
                 checkQueue.enqueue(packedPos);
                 continue;
             }
@@ -352,6 +376,8 @@ public final class WildPathsSavedData extends SavedData {
         long[] timestamps = new long[lastUses.size()];
         long[] attempts = new long[lastUses.size()];
         int[] failures = new int[lastUses.size()];
+        long[] wetTimes = new long[lastUses.size()];
+        long[] dryingTimes = new long[lastUses.size()];
         int index = 0;
 
         for (Long2LongOpenHashMap.Entry entry : lastUses.long2LongEntrySet()) {
@@ -360,6 +386,8 @@ public final class WildPathsSavedData extends SavedData {
             timestamps[index] = entry.getLongValue();
             attempts[index] = lastAttempts.get(packedPos);
             failures[index] = failedAttempts.get(packedPos);
+            wetTimes[index] = lastWetTimes.getOrDefault(packedPos, 0L);
+            dryingTimes[index] = lastDryingTimes.getOrDefault(packedPos, 0L);
             index++;
         }
 
@@ -367,6 +395,8 @@ public final class WildPathsSavedData extends SavedData {
         tag.putLongArray(LAST_USES_TAG, timestamps);
         tag.putLongArray(LAST_ATTEMPTS_TAG, attempts);
         tag.putIntArray(FAILED_ATTEMPTS_TAG, failures);
+        tag.putLongArray(LAST_WET_TIMES_TAG, wetTimes);
+        tag.putLongArray(LAST_DRYING_TIMES_TAG, dryingTimes);
 
         long[] wearPositions = new long[wearWalks.size()];
         int[] walks = new int[wearWalks.size()];
@@ -395,6 +425,53 @@ public final class WildPathsSavedData extends SavedData {
         lastUses.remove(packedPos);
         lastAttempts.remove(packedPos);
         failedAttempts.remove(packedPos);
+        lastWetTimes.remove(packedPos);
+        lastDryingTimes.remove(packedPos);
+        setDirty();
+    }
+
+    private void dryTrackedBlock(long packedPos, long gameTime, TransitionRule transition) {
+        int failures = failedAttempts.get(packedPos);
+        if (failures <= 0 || transition.dryingChanceDecrease() <= 0.0) {
+            return;
+        }
+
+        if (!lastWetTimes.containsKey(packedPos)) {
+            lastWetTimes.put(packedPos, gameTime);
+            lastDryingTimes.put(packedPos, gameTime);
+            setDirty();
+            return;
+        }
+
+        long lastWet = lastWetTimes.get(packedPos);
+        if (gameTime < lastWet) {
+            lastWetTimes.put(packedPos, gameTime);
+            lastDryingTimes.put(packedPos, gameTime);
+            setDirty();
+            return;
+        }
+
+        long dryingStart = lastWet + transition.dryingDelay();
+        long lastDrying = Math.max(
+                lastDryingTimes.getOrDefault(packedPos, lastWet),
+                dryingStart
+        );
+        long elapsed = gameTime - lastDrying;
+        long intervals = elapsed / transition.dryingInterval();
+        if (intervals <= 0L) {
+            return;
+        }
+
+        double chanceDecrease = intervals * transition.dryingChanceDecrease();
+        int failureDecrease = (int) Math.min(
+                Integer.MAX_VALUE,
+                Math.ceil(chanceDecrease / transition.chanceIncrease() - 1.0E-12)
+        );
+        failedAttempts.put(packedPos, Math.max(0, failures - failureDecrease));
+        lastDryingTimes.put(
+                packedPos,
+                lastDrying + intervals * transition.dryingInterval()
+        );
         setDirty();
     }
 

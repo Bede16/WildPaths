@@ -12,6 +12,9 @@ public record TransitionRule(
         double chanceIncrease,
         double maxChance,
         boolean requiresRain,
+        long dryingDelay,
+        long dryingInterval,
+        double dryingChanceDecrease,
         boolean resetOnWalk,
         boolean discoverNearby
 ) {

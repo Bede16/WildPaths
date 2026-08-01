@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.2
+
+- Reduce the default walk requirements and raise traffic transition probabilities
+- Raise the default neighboring ground-wear chance from 15% to 50%
+- Increase moss probability during sustained rain and let it fall again while blocks dry
+- Shorten the live debug overlay so it fits on one action-bar line
+- Use only `/wildpaths debug true` and `/wildpaths debug false` for the overlay toggle
+- Migrate unchanged 2.0.1 traffic defaults while preserving custom values and recovery settings
+
 ## 2.0.1
 
 - Let unfinished path-creation wear recover after a configurable quiet period

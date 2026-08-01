@@ -31,12 +31,12 @@ import java.util.Map;
 /** Loads all Wild Paths settings from one JSON5 file. */
 public final class WildPathsConfig {
     public static final String FILE_NAME = "wild_paths.json5";
-    private static final int CURRENT_CONFIG_VERSION = 4;
+    private static final int CURRENT_CONFIG_VERSION = 6;
     private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
 
     private static final String DEFAULT_JSON5 = """
             {
-              configVersion: 4,
+              configVersion: 6,
 
               // Limits how much work Wild Paths performs at once.
               processing: {
@@ -73,21 +73,21 @@ public final class WildPathsConfig {
                   {
                     from: "minecraft:grass_block",
                     to: "minecraft:dirt",
-                    minimumWalks: 20,
-                    chance: 0.05,
-                    chanceIncrease: 0.02,
-                    maxChance: 0.50,
+                    minimumWalks: 5,
+                    chance: 0.20,
+                    chanceIncrease: 0.10,
+                    maxChance: 0.80,
                     // Each horizontal neighbor has a small chance to gain one wear point.
-                    neighborChance: 0.15,
+                    neighborChance: 0.50,
                   },
                   {
                     from: "minecraft:dirt",
                     to: "minecraft:dirt_path",
-                    minimumWalks: 15,
-                    chance: 0.08,
-                    chanceIncrease: 0.03,
-                    maxChance: 0.60,
-                    neighborChance: 0.15,
+                    minimumWalks: 8,
+                    chance: 0.15,
+                    chanceIncrease: 0.10,
+                    maxChance: 0.80,
+                    neighborChance: 0.50,
                   },
                 ],
               },
@@ -99,18 +99,18 @@ public final class WildPathsConfig {
                   {
                     from: "minecraft:tall_grass",
                     to: "minecraft:short_grass",
-                    minimumWalks: 2,
-                    chance: 0.25,
-                    chanceIncrease: 0.15,
+                    minimumWalks: 1,
+                    chance: 0.50,
+                    chanceIncrease: 0.25,
                     maxChance: 1.0,
                   },
                   {
                     from: "minecraft:short_grass",
                     to: "minecraft:air",
-                    minimumWalks: 3,
-                    chance: 0.20,
-                    chanceIncrease: 0.10,
-                    maxChance: 0.80,
+                    minimumWalks: 2,
+                    chance: 0.35,
+                    chanceIncrease: 0.20,
+                    maxChance: 1.0,
                   },
                 ],
               },
@@ -136,7 +136,12 @@ public final class WildPathsConfig {
                   ticks: 0,
                   chanceInterval: 1200,
                   chance: 0.005,
+                  chanceIncrease: 0.005,
+                  maxChance: 0.15,
                   requiresRain: true,
+                  dryingDelay: 2400,
+                  dryingInterval: 1200,
+                  dryingChanceDecrease: 0.01,
                   resetOnWalk: false,
                   discoverNearby: true,
                 },
@@ -146,7 +151,12 @@ public final class WildPathsConfig {
                   ticks: 0,
                   chanceInterval: 1200,
                   chance: 0.005,
+                  chanceIncrease: 0.005,
+                  maxChance: 0.15,
                   requiresRain: true,
+                  dryingDelay: 2400,
+                  dryingInterval: 1200,
+                  dryingChanceDecrease: 0.01,
                   resetOnWalk: false,
                   discoverNearby: true,
                 },
@@ -181,7 +191,7 @@ public final class WildPathsConfig {
                     Files.copy(configPath, backupPath, StandardCopyOption.COPY_ATTRIBUTES);
                 }
 
-                root = migrate(root);
+                root = migrate(root, fileVersion);
                 Files.writeString(configPath, renderJson5(root));
                 WildPaths.LOGGER.info("Updated {} from config version {} to {}. Backup: {}", configPath, fileVersion, CURRENT_CONFIG_VERSION, backupPath);
             } else if (fileVersion > CURRENT_CONFIG_VERSION) {
@@ -367,7 +377,7 @@ public final class WildPathsConfig {
             double chance = requiredProbability(object, "chance", false);
             double chanceIncrease = requiredProbability(object, "chanceIncrease", true);
             double maxChance = requiredProbability(object, "maxChance", false);
-            double neighborChance = optionalProbability(object, "neighborChance", 0.15, true);
+            double neighborChance = optionalProbability(object, "neighborChance", 0.50, true);
             if (maxChance < chance) {
                 throw new IllegalArgumentException("Path creation maxChance must be at least chance");
             }
@@ -438,6 +448,13 @@ public final class WildPathsConfig {
             double chanceIncrease = object.has("chanceIncrease") ? object.get("chanceIncrease").getAsDouble() : 0.0;
             double maxChance = object.has("maxChance") ? object.get("maxChance").getAsDouble() : 1.0;
             boolean requiresRain = object.has("requiresRain") && object.get("requiresRain").getAsBoolean();
+            long dryingDelay = object.has("dryingDelay") ? object.get("dryingDelay").getAsLong() : 0L;
+            long dryingInterval = object.has("dryingInterval")
+                    ? object.get("dryingInterval").getAsLong()
+                    : chanceInterval;
+            double dryingChanceDecrease = object.has("dryingChanceDecrease")
+                    ? object.get("dryingChanceDecrease").getAsDouble()
+                    : 0.0;
             boolean resetOnWalk = !object.has("resetOnWalk") || object.get("resetOnWalk").getAsBoolean();
             boolean discoverNearby = !object.has("discoverNearby") || object.get("discoverNearby").getAsBoolean();
 
@@ -456,6 +473,22 @@ public final class WildPathsConfig {
             if (!Double.isFinite(maxChance) || maxChance < chance || maxChance > 1.0) {
                 throw new IllegalArgumentException("Transition maxChance must be at least chance and at most 1");
             }
+            if (dryingDelay < 0L) {
+                throw new IllegalArgumentException("Transition dryingDelay must be at least 0");
+            }
+            if (dryingInterval < 1L) {
+                throw new IllegalArgumentException("Transition dryingInterval must be at least 1");
+            }
+            if (!Double.isFinite(dryingChanceDecrease)
+                    || dryingChanceDecrease < 0.0
+                    || dryingChanceDecrease > 1.0) {
+                throw new IllegalArgumentException("Transition dryingChanceDecrease must be between 0 and 1");
+            }
+            if (dryingChanceDecrease > 0.0 && (!requiresRain || chanceIncrease == 0.0)) {
+                throw new IllegalArgumentException(
+                        "Transition drying requires rain and a chanceIncrease greater than 0"
+                );
+            }
             TransitionRule transition = new TransitionRule(
                     from,
                     to,
@@ -465,6 +498,9 @@ public final class WildPathsConfig {
                     chanceIncrease,
                     maxChance,
                     requiresRain,
+                    dryingDelay,
+                    dryingInterval,
+                    dryingChanceDecrease,
                     resetOnWalk,
                     discoverNearby
             );
@@ -493,9 +529,13 @@ public final class WildPathsConfig {
         );
     }
 
-    private static JsonObject migrate(JsonObject existing) {
+    private static JsonObject migrate(JsonObject existing, int sourceVersion) {
         JsonObject defaults = parseRoot(new StringReader(DEFAULT_JSON5));
         mergeMissing(existing, defaults);
+
+        if (sourceVersion < 5) {
+            migrateDefaultTrafficValues(existing);
+        }
 
         JsonArray existingTransitions = existing.getAsJsonArray("transitions");
         JsonArray defaultTransitions = defaults.getAsJsonArray("transitions");
@@ -521,6 +561,100 @@ public final class WildPathsConfig {
 
         existing.addProperty("configVersion", CURRENT_CONFIG_VERSION);
         return existing;
+    }
+
+    private static void migrateDefaultTrafficValues(JsonObject root) {
+        updateDefaultTrafficRule(
+                root.getAsJsonObject("pathCreation"),
+                "minecraft:grass_block",
+                20, 0.05, 0.02, 0.50,
+                5, 0.20, 0.10, 0.80,
+                0.15, 0.50
+        );
+        updateDefaultTrafficRule(
+                root.getAsJsonObject("pathCreation"),
+                "minecraft:dirt",
+                15, 0.08, 0.03, 0.60,
+                8, 0.15, 0.10, 0.80,
+                0.15, 0.50
+        );
+        updateDefaultTrafficRule(
+                root.getAsJsonObject("trampling"),
+                "minecraft:tall_grass",
+                2, 0.25, 0.15, 1.0,
+                1, 0.50, 0.25, 1.0,
+                -1.0, -1.0
+        );
+        updateDefaultTrafficRule(
+                root.getAsJsonObject("trampling"),
+                "minecraft:short_grass",
+                3, 0.20, 0.10, 0.80,
+                2, 0.35, 0.20, 1.0,
+                -1.0, -1.0
+        );
+    }
+
+    private static void updateDefaultTrafficRule(
+            JsonObject section,
+            String from,
+            int oldMinimumWalks,
+            double oldChance,
+            double oldChanceIncrease,
+            double oldMaxChance,
+            int newMinimumWalks,
+            double newChance,
+            double newChanceIncrease,
+            double newMaxChance,
+            double oldNeighborChance,
+            double newNeighborChance
+    ) {
+        if (section == null || !section.has("transitions")) {
+            return;
+        }
+        for (JsonElement element : section.getAsJsonArray("transitions")) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject rule = element.getAsJsonObject();
+            if (!rule.has("from") || !from.equals(rule.get("from").getAsString())) {
+                continue;
+            }
+            if (matchesTrafficValues(
+                    rule,
+                    oldMinimumWalks,
+                    oldChance,
+                    oldChanceIncrease,
+                    oldMaxChance
+            )) {
+                rule.addProperty("minimumWalks", newMinimumWalks);
+                rule.addProperty("chance", newChance);
+                rule.addProperty("chanceIncrease", newChanceIncrease);
+                rule.addProperty("maxChance", newMaxChance);
+                if (oldNeighborChance >= 0.0
+                        && rule.has("neighborChance")
+                        && Double.compare(rule.get("neighborChance").getAsDouble(), oldNeighborChance) == 0) {
+                    rule.addProperty("neighborChance", newNeighborChance);
+                }
+            }
+            return;
+        }
+    }
+
+    private static boolean matchesTrafficValues(
+            JsonObject rule,
+            int minimumWalks,
+            double chance,
+            double chanceIncrease,
+            double maxChance
+    ) {
+        return rule.has("minimumWalks")
+                && rule.get("minimumWalks").getAsInt() == minimumWalks
+                && rule.has("chance")
+                && Double.compare(rule.get("chance").getAsDouble(), chance) == 0
+                && rule.has("chanceIncrease")
+                && Double.compare(rule.get("chanceIncrease").getAsDouble(), chanceIncrease) == 0
+                && rule.has("maxChance")
+                && Double.compare(rule.get("maxChance").getAsDouble(), maxChance) == 0;
     }
 
     private static void mergeMissing(JsonObject target, JsonObject defaults) {

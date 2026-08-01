@@ -56,7 +56,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
 
 ```json5
 {
-  configVersion: 4,
+  configVersion: 6,
 
   // Limits how much work Wild Paths performs at once.
   processing: {
@@ -93,20 +93,20 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       {
         from: "minecraft:grass_block",
         to: "minecraft:dirt",
-        minimumWalks: 20,
-        chance: 0.05,
-        chanceIncrease: 0.02,
-        maxChance: 0.50,
-        neighborChance: 0.15,
+        minimumWalks: 5,
+        chance: 0.20,
+        chanceIncrease: 0.10,
+        maxChance: 0.80,
+        neighborChance: 0.50,
       },
       {
         from: "minecraft:dirt",
         to: "minecraft:dirt_path",
-        minimumWalks: 15,
-        chance: 0.08,
-        chanceIncrease: 0.03,
-        maxChance: 0.60,
-        neighborChance: 0.15,
+        minimumWalks: 8,
+        chance: 0.15,
+        chanceIncrease: 0.10,
+        maxChance: 0.80,
+        neighborChance: 0.50,
       },
     ],
   },
@@ -118,18 +118,18 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       {
         from: "minecraft:tall_grass",
         to: "minecraft:short_grass",
-        minimumWalks: 2,
-        chance: 0.25,
-        chanceIncrease: 0.15,
+        minimumWalks: 1,
+        chance: 0.50,
+        chanceIncrease: 0.25,
         maxChance: 1.0,
       },
       {
         from: "minecraft:short_grass",
         to: "minecraft:air",
-        minimumWalks: 3,
-        chance: 0.20,
-        chanceIncrease: 0.10,
-        maxChance: 0.80,
+        minimumWalks: 2,
+        chance: 0.35,
+        chanceIncrease: 0.20,
+        maxChance: 1.0,
       },
     ],
   },
@@ -155,7 +155,12 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       ticks: 0,
       chanceInterval: 1200,
       chance: 0.005,
+      chanceIncrease: 0.005,
+      maxChance: 0.15,
       requiresRain: true,
+      dryingDelay: 2400,
+      dryingInterval: 1200,
+      dryingChanceDecrease: 0.01,
       resetOnWalk: false,
       discoverNearby: true,
     },
@@ -165,7 +170,12 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       ticks: 0,
       chanceInterval: 1200,
       chance: 0.005,
+      chanceIncrease: 0.005,
+      maxChance: 0.15,
       requiresRain: true,
+      dryingDelay: 2400,
+      dryingInterval: 1200,
+      dryingChanceDecrease: 0.01,
       resetOnWalk: false,
       discoverNearby: true,
     },
@@ -174,6 +184,8 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
 ```
 
 Each `from` block may appear only once. `ticks` is the protected time before the first roll. `chanceInterval` controls the delay between rolls. `chance` is the initial probability from greater than `0.0` through `1.0`; `chanceIncrease` is added after each failed roll, up to `maxChance`. Walking on a rule with `resetOnWalk` restarts its protected time and probability. When `requiresRain` is enabled, a roll only happens while rain can reach the block.
+
+Rain-dependent rules can gradually dry again. After `dryingDelay` without rain reaching the block, the accumulated probability falls by `dryingChanceDecrease` every `dryingInterval`, but never below the base `chance`. Rain resumes from the remaining probability. With the moss defaults, failed rainy rolls add 0.5 percentage points per minute up to 15%; after two dry minutes, one percentage point is removed per further minute.
 
 `pathCreation.transitions` contains the separate rules driven by player traffic. `minimumWalks` is the guaranteed number of crossings before any roll can happen. Each later crossing rolls `chance`, increases it by `chanceIncrease` after a failure, and caps it at `maxChance`. A successful transition clears all wear at that position, so the next configured stage always starts at zero. With the defaults this produces `grass_block` -> `dirt` -> `dirt_path`. Every player and every renewed crossing counts, including walking back and forth or landing after a jump. Standing still, flying, and creatures do not add repeated wear.
 
@@ -198,8 +210,8 @@ Wild Paths provides these administrator commands (permission level 2):
 - `/wildpaths reload` reloads `wild_paths.json5` without restarting the server.
 - `/wildpaths status` shows configured timed, path-creation, and trampling transitions plus tracked-block and processing statistics.
 - `/wildpaths debug <x> <y> <z>` shows timed, path-creation, or trampling progress for one loaded block.
-- `/wildpaths debug on` or `/wildpaths debug true` enables a live action-bar display for the block the player is looking at.
-- `/wildpaths debug off` or `/wildpaths debug false` disables the live display.
+- `/wildpaths debug true` enables a compact live action-bar display for the block the player is looking at.
+- `/wildpaths debug false` disables the live display.
 
 The coordinate argument supports absolute and relative Minecraft coordinates, for example `/wildpaths debug ~ ~-1 ~`.
 
