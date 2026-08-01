@@ -38,7 +38,7 @@ jobs:
       - name: Read mod version
         id: mod_version
         shell: bash
-        run: echo "value=$(sed -n 's/^mod_version=//p' gradle.properties)" >> "$GITHUB_OUTPUT"
+        run: echo "value=$(sed -n 's/^mod_version=//p' gradle.properties | tr -d '\r')" >> "$GITHUB_OUTPUT"
 
       - name: Upload Wild Paths mod
         uses: actions/upload-artifact@v4
