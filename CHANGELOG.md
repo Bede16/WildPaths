@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1
+
+- Reliably reset dirt-path decay when walking on the slightly lower path block
+- Add versioned automatic JSON5 configuration migrations with backups
+- Automatically publish a GitHub Release and mod JAR after a successful version build
+
 ## 1.2.0
 
 - Add a protected period and increasing decay probability for dirt paths
@@ -21,3 +27,4 @@
 - Persist tracking data per dimension
 - Convert inactive dirt paths back into dirt
 - Add configurable decay timing and bounded processing
+
