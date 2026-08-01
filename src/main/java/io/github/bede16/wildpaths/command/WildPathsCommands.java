@@ -8,6 +8,7 @@ import io.github.bede16.wildpaths.config.TramplingRule;
 import io.github.bede16.wildpaths.config.TransitionRule;
 import io.github.bede16.wildpaths.config.WildPathsConfig;
 import io.github.bede16.wildpaths.data.WildPathsSavedData;
+import io.github.bede16.wildpaths.network.OpenNumericConfigPayload;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
@@ -22,6 +23,8 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.registration.NetworkRegistry;
 
 import java.util.HashSet;
 import java.util.Locale;
@@ -38,6 +41,8 @@ public final class WildPathsCommands {
                         .requires(source -> source.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .then(Commands.literal("reload")
                                 .executes(context -> reload(context.getSource())))
+                        .then(Commands.literal("config")
+                                .executes(context -> openConfig(context.getSource())))
                         .then(Commands.literal("status")
                                 .executes(context -> status(context.getSource())))
                         .then(Commands.literal("debug")
@@ -102,6 +107,22 @@ public final class WildPathsCommands {
         source.sendSuccess(
                 () -> Component.literal("Wild Paths configuration reloaded successfully."),
                 true
+        );
+        return 1;
+    }
+
+    private static int openConfig(CommandSourceStack source) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        if (!NetworkRegistry.hasChannel(player.connection, OpenNumericConfigPayload.TYPE.id())) {
+            source.sendFailure(Component.literal(
+                    "Wild Paths config screen requires Wild Paths and YACL 3.8.2 or newer on your client."
+            ));
+            return 0;
+        }
+
+        PacketDistributor.sendToPlayer(
+                player,
+                new OpenNumericConfigPayload(WildPathsConfig.exportConfigScreenData())
         );
         return 1;
     }
@@ -315,13 +336,14 @@ public final class WildPathsCommands {
         source.sendSuccess(
                 () -> Component.literal(String.format(
                         Locale.ROOT,
-                        "Wild Paths trampling: %s at %s -> %s; %d walks, %d protected walks remaining, chance %.2f%%.",
+                        "Wild Paths trampling: %s at %s -> %s; %d walks, %d protected walks remaining, chance %.2f%%, neighbor chance %.2f%%.",
                         blockName,
                         formatPos(pos),
                         BuiltInRegistries.BLOCK.getKey(transition.to()),
                         walks,
                         protectedWalks,
-                        currentChance * 100.0
+                        currentChance * 100.0,
+                        transition.neighborChance() * 100.0
                 )),
                 false
         );
@@ -389,7 +411,7 @@ public final class WildPathsCommands {
         if (entry == null) {
             return Component.literal(String.format(
                     Locale.ROOT,
-                    "WP | %s → %s | not tracked",
+                    "WP | %s â†’ %s | not tracked",
                     shortBlockName(state),
                     shortBlockName(transition.to().defaultBlockState())
             ));
@@ -410,7 +432,7 @@ public final class WildPathsCommands {
                 : "";
         return Component.literal(String.format(
                 Locale.ROOT,
-                "WP | %s → %s | %s | %.0f%%%s",
+                "WP | %s â†’ %s | %s | %.0f%%%s",
                 shortBlockName(state),
                 shortBlockName(transition.to().defaultBlockState()),
                 timer,
@@ -429,7 +451,7 @@ public final class WildPathsCommands {
         if (walks <= minimumWalks) {
             return Component.literal(String.format(
                     Locale.ROOT,
-                    "WP | %s → %s | %d/%d | protected",
+                    "WP | %s â†’ %s | %d/%d | protected",
                     from,
                     to,
                     walks,
@@ -438,7 +460,7 @@ public final class WildPathsCommands {
         }
         return Component.literal(String.format(
                 Locale.ROOT,
-                "WP | %s → %s | %d walks | %.0f%%",
+                "WP | %s â†’ %s | %d walks | %.0f%%",
                 from,
                 to,
                 walks,
@@ -473,3 +495,4 @@ public final class WildPathsCommands {
     private WildPathsCommands() {
     }
 }
+

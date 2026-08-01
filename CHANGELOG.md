@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.0
+
+- Let nearby tall and short grass gain configurable trampling wear
+- Clear protected neighboring path and plant progress before applying nearby wear
+- Add a YACL screen containing number-entry fields for existing numeric settings
+- Let permission-level-2 administrators edit and apply server numbers through `/wildpaths config`
+- Add a configurable `trafficMobs` entity-type list with adult and baby villagers enabled by default
+- Apply path creation, trampling, neighboring wear, path preservation, and wool protection to configured mobs
+- Add an editable YACL category for traffic-mob entity lists
+- Add `riddenTrafficMobs` with horses enabled only while a player is riding them
+
 ## 2.0.2
 
 - Reduce the default walk requirements and raise traffic transition probabilities
@@ -60,4 +71,5 @@
 - Persist tracking data per dimension
 - Convert inactive dirt paths back into dirt
 - Add configurable decay timing and bounded processing
+
 

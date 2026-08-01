@@ -9,6 +9,8 @@ public record TramplingRule(
         int minimumWalks,
         double chance,
         double chanceIncrease,
-        double maxChance
+        double maxChance,
+        double neighborChance
 ) {
 }
+

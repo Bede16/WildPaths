@@ -12,13 +12,19 @@ import net.minecraft.core.SectionPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
+import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
+import net.neoforged.neoforge.event.tick.EntityTickEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 import java.util.HashMap;
@@ -26,7 +32,7 @@ import java.util.Map;
 import java.util.UUID;
 
 public final class WildPathsEvents {
-    private static final int PLAYER_SAMPLE_INTERVAL = 20;
+    private static final int TRAFFIC_SAMPLE_INTERVAL = 20;
     private final Map<UUID, Integer> scanCursors = new HashMap<>();
     private final Map<UUID, WalkSample> lastWalkSamples = new HashMap<>();
 
@@ -68,10 +74,10 @@ public final class WildPathsEvents {
             data.clear(protectedGroundPos);
             data.clear(observedPos);
         } else {
-            recordPlayerTraffic(player, level, data, observedPos, observedState);
+            recordEntityTraffic(player, level, data, observedPos, observedState);
         }
 
-        if (player.tickCount % PLAYER_SAMPLE_INTERVAL != 0) {
+        if (player.tickCount % TRAFFIC_SAMPLE_INTERVAL != 0) {
             return;
         }
 
@@ -85,6 +91,52 @@ public final class WildPathsEvents {
         }
 
         scanNearbySurface(player, level, data);
+    }
+
+    @SubscribeEvent
+    public void onEntityTick(EntityTickEvent.Post event) {
+        Entity entity = event.getEntity();
+        if (!(entity instanceof Mob)
+                || !WildPathsConfig.isTrafficMob(entity)
+                || !(entity.level() instanceof ServerLevel level)
+                || !isEnabled(level)) {
+            return;
+        }
+
+        WildPathsSavedData data = WildPathsSavedData.get(level);
+        BlockPos observedPos = walkedBlockPos(entity, level);
+        BlockState observedState = level.getBlockState(observedPos);
+        boolean tramplingBlock = WildPathsConfig.findTrampling(observedState) != null;
+        BlockPos protectedGroundPos = tramplingBlock ? observedPos.below() : observedPos;
+        boolean protectedByWool = WildPathsSavedData.isProtected(level, protectedGroundPos);
+        if (protectedByWool) {
+            data.clear(protectedGroundPos);
+            data.clear(observedPos);
+        } else {
+            recordEntityTraffic(entity, level, data, observedPos, observedState);
+        }
+
+        if (entity.tickCount % TRAFFIC_SAMPLE_INTERVAL != 0) {
+            return;
+        }
+        TransitionRule walkedTransition = WildPathsConfig.find(observedState);
+        if (!protectedByWool && walkedTransition != null) {
+            if (walkedTransition.resetOnWalk()) {
+                data.recordUse(observedPos, level.getGameTime());
+            } else {
+                data.observe(observedPos, level.getGameTime());
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public void onEntityLeaveLevel(EntityLeaveLevelEvent event) {
+        if (!(event.getLevel() instanceof ServerLevel)) {
+            return;
+        }
+        UUID entityId = event.getEntity().getUUID();
+        lastWalkSamples.remove(entityId);
+        scanCursors.remove(entityId);
     }
 
     @SubscribeEvent
@@ -135,29 +187,30 @@ public final class WildPathsEvents {
                 || WildPathsConfig.findTrampling(state) != null;
     }
 
-    private static BlockPos walkedBlockPos(ServerPlayer player, ServerLevel level) {
-        BlockPos feetPos = player.blockPosition();
+    private static BlockPos walkedBlockPos(Entity entity, ServerLevel level) {
+        BlockPos feetPos = entity.blockPosition();
         if (isConfigured(level.getBlockState(feetPos))) {
             return feetPos;
         }
         return feetPos.below();
     }
 
-    private void recordPlayerTraffic(
-            ServerPlayer player,
+    private void recordEntityTraffic(
+            Entity entity,
             ServerLevel level,
             WildPathsSavedData data,
             BlockPos observedPos,
             BlockState observedState
     ) {
         long packedPos = observedPos.asLong();
-        WalkSample previous = lastWalkSamples.get(player.getUUID());
-        boolean landedOrEntered = player.onGround()
+        WalkSample previous = lastWalkSamples.get(entity.getUUID());
+        boolean landedOrEntered = entity.onGround()
                 && (previous == null || !previous.onGround() || previous.packedPos() != packedPos);
 
         TramplingRule trampling = WildPathsConfig.findTrampling(observedState);
         if (landedOrEntered && trampling != null) {
             boolean trampled = data.recordTrampling(level, observedPos, trampling);
+            influenceNeighborTrampling(level, data, observedPos);
             if (trampled) {
                 WildPaths.LOGGER.debug(
                         "Player traffic trampled {} to {} at {}",
@@ -182,7 +235,7 @@ public final class WildPathsEvents {
             }
         }
 
-        lastWalkSamples.put(player.getUUID(), new WalkSample(packedPos, player.onGround()));
+        lastWalkSamples.put(entity.getUUID(), new WalkSample(packedPos, entity.onGround()));
     }
 
     private static void influenceNeighborWear(
@@ -214,6 +267,11 @@ public final class WildPathsEvents {
                         continue;
                     }
 
+                    if (WildPathsSavedData.isProtected(level, neighborPos)) {
+                        data.clear(neighborPos);
+                        break;
+                    }
+
                     if (!WildPathsConfig.isPathCreationSpaceAllowed(level, neighborPos)) {
                         break;
                     }
@@ -225,6 +283,60 @@ public final class WildPathsEvents {
                 }
             }
         }
+    }
+
+    private static void influenceNeighborTrampling(
+            ServerLevel level,
+            WildPathsSavedData data,
+            BlockPos center
+    ) {
+        for (int offsetX = -1; offsetX <= 1; offsetX++) {
+            for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                if (offsetX == 0 && offsetZ == 0) {
+                    continue;
+                }
+
+                int blockX = center.getX() + offsetX;
+                int blockZ = center.getZ() + offsetZ;
+                if (level.getChunkSource().getChunkNow(
+                        SectionPos.blockToSectionCoord(blockX),
+                        SectionPos.blockToSectionCoord(blockZ)
+                ) == null) {
+                    continue;
+                }
+
+                for (int offsetY = 1; offsetY >= -1; offsetY--) {
+                    BlockPos neighborPos = center.offset(offsetX, offsetY, offsetZ);
+                    TramplingRule neighborRule = WildPathsConfig.findTrampling(
+                            level.getBlockState(neighborPos)
+                    );
+                    if (neighborRule == null) {
+                        continue;
+                    }
+
+                    BlockPos normalizedPos = normalizeTramplingPos(neighborPos, level.getBlockState(neighborPos));
+                    BlockPos groundPos = normalizedPos.below();
+                    if (WildPathsSavedData.isProtected(level, groundPos)) {
+                        data.clear(groundPos);
+                        data.clear(normalizedPos);
+                        break;
+                    }
+
+                    if (level.random.nextDouble() <= neighborRule.neighborChance()) {
+                        data.recordTrampling(level, neighborPos, neighborRule);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    private static BlockPos normalizeTramplingPos(BlockPos pos, BlockState state) {
+        if (state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
+                && state.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER) {
+            return pos.below();
+        }
+        return pos;
     }
 
     private void scanNearbySurface(ServerPlayer player, ServerLevel level, WildPathsSavedData data) {
@@ -273,3 +385,4 @@ public final class WildPathsEvents {
     private record WalkSample(long packedPos, boolean onGround) {
     }
 }
+

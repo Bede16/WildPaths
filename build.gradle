@@ -3,6 +3,14 @@ plugins {
     id 'net.neoforged.gradle.userdev' version '7.1.38'
 }
 
+repositories {
+    mavenCentral()
+    maven {
+        name = 'Xander Maven'
+        url = 'https://maven.isxander.dev/releases'
+    }
+}
+
 tasks.named('wrapper', Wrapper).configure {
     distributionType = Wrapper.DistributionType.BIN
 }
@@ -59,6 +67,7 @@ configurations {
 
 dependencies {
     implementation "net.neoforged:neoforge:${neo_version}"
+    implementation "dev.isxander:yet-another-config-lib:${yacl_version}"
 }
 
 tasks.withType(ProcessResources).configureEach {
@@ -89,3 +98,4 @@ idea {
         downloadJavadoc = true
     }
 }
+

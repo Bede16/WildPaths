@@ -14,6 +14,9 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.TagKey;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.fml.loading.FMLPaths;
@@ -24,19 +27,21 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Loads all Wild Paths settings from one JSON5 file. */
 public final class WildPathsConfig {
     public static final String FILE_NAME = "wild_paths.json5";
-    private static final int CURRENT_CONFIG_VERSION = 6;
+    private static final int CURRENT_CONFIG_VERSION = 9;
     private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
 
     private static final String DEFAULT_JSON5 = """
             {
-              configVersion: 6,
+              configVersion: 9,
 
               // Limits how much work Wild Paths performs at once.
               processing: {
@@ -47,6 +52,17 @@ public final class WildPathsConfig {
                 nearbyScanDepth: 6,
                 nearbyScanColumnsPerPlayer: 128,
               },
+
+              // These mob types create and preserve paths and trample plants like players.
+              // minecraft:villager includes both adult and baby villagers.
+              trafficMobs: [
+                "minecraft:villager",
+              ],
+
+              // These mob types count only while a player is riding them.
+              riddenTrafficMobs: [
+                "minecraft:horse",
+              ],
 
               // Unfinished traffic wear slowly disappears when nobody uses the block.
               // 24000 ticks are one Minecraft day while the dimension is running.
@@ -92,7 +108,7 @@ public final class WildPathsConfig {
                 ],
               },
 
-              // Plants can be worn down in separate stages by direct player traffic.
+              // Plants can be worn down in separate stages by configured traffic.
               trampling: {
                 enabled: true,
                 transitions: [
@@ -103,6 +119,8 @@ public final class WildPathsConfig {
                     chance: 0.50,
                     chanceIncrease: 0.25,
                     maxChance: 1.0,
+                    // Each horizontal neighboring plant has a chance to gain one wear point.
+                    neighborChance: 0.50,
                   },
                   {
                     from: "minecraft:short_grass",
@@ -111,6 +129,7 @@ public final class WildPathsConfig {
                     chance: 0.35,
                     chanceIncrease: 0.20,
                     maxChance: 1.0,
+                    neighborChance: 0.50,
                   },
                 ],
               },
@@ -166,6 +185,7 @@ public final class WildPathsConfig {
 
     private static volatile Settings settings = new Settings(
             200, 1_024, false, 24, 6, 128,
+            Set.of(), Set.of(),
             true, 24_000L, 1_200L, 1,
             true, List.of(), Map.of(), true, Map.of(), Map.of()
     );
@@ -238,6 +258,133 @@ public final class WildPathsConfig {
         return settings.nearbyScanColumnsPerPlayer();
     }
 
+    public static synchronized String exportConfigScreenData() {
+        Path configPath = FMLPaths.CONFIGDIR.get().resolve(FILE_NAME);
+        try {
+            if (Files.notExists(configPath)) {
+                Files.createDirectories(configPath.getParent());
+                Files.writeString(configPath, DEFAULT_JSON5);
+            }
+            try (Reader reader = Files.newBufferedReader(configPath)) {
+                JsonObject root = parseRoot(reader);
+                int fileVersion = root.has("configVersion") ? root.get("configVersion").getAsInt() : 1;
+                if (fileVersion < CURRENT_CONFIG_VERSION) {
+                    root = migrate(root, fileVersion);
+                }
+                return PRETTY_GSON.toJson(root);
+            }
+        } catch (Exception exception) {
+            WildPaths.LOGGER.error("Could not export {} for the config screen", configPath, exception);
+            return PRETTY_GSON.toJson(parseRoot(new StringReader(DEFAULT_JSON5)));
+        }
+    }
+
+    /** Updates supported number fields and traffic-mob lists while preserving rule identities and switches. */
+    public static synchronized String applyConfigScreenChanges(String submittedJson) {
+        Path configPath = FMLPaths.CONFIGDIR.get().resolve(FILE_NAME);
+        Path temporaryPath = configPath.resolveSibling(FILE_NAME + ".tmp");
+
+        try {
+            JsonObject submitted = parseRoot(new StringReader(submittedJson));
+            JsonObject current;
+            try (Reader reader = Files.newBufferedReader(configPath)) {
+                current = parseRoot(reader);
+            }
+            int fileVersion = current.has("configVersion") ? current.get("configVersion").getAsInt() : 1;
+            if (fileVersion > CURRENT_CONFIG_VERSION) {
+                throw new IllegalArgumentException(
+                        "Config version " + fileVersion + " is newer than supported version " + CURRENT_CONFIG_VERSION
+                );
+            }
+            if (fileVersion < CURRENT_CONFIG_VERSION) {
+                Path backupPath = configPath.resolveSibling(
+                        FILE_NAME + ".before-v" + CURRENT_CONFIG_VERSION + ".backup"
+                );
+                if (Files.notExists(backupPath)) {
+                    Files.copy(configPath, backupPath, StandardCopyOption.COPY_ATTRIBUTES);
+                }
+                current = migrate(current, fileVersion);
+            }
+
+            copyStringArray(current, submitted, "trafficMobs");
+            copyStringArray(current, submitted, "riddenTrafficMobs");
+
+            copyNumericProperties(
+                    current.getAsJsonObject("processing"),
+                    submitted.getAsJsonObject("processing"),
+                    "checkInterval",
+                    "maxChecksPerInterval",
+                    "nearbyScanRadius",
+                    "nearbyScanDepth",
+                    "nearbyScanColumnsPerPlayer"
+            );
+            copyNumericProperties(
+                    current.getAsJsonObject("wearRecovery"),
+                    submitted.getAsJsonObject("wearRecovery"),
+                    "delayTicks",
+                    "intervalTicks",
+                    "amountPerInterval"
+            );
+            copyTransitionNumbers(
+                    current.getAsJsonObject("pathCreation"),
+                    submitted.getAsJsonObject("pathCreation"),
+                    "minimumWalks",
+                    "chance",
+                    "chanceIncrease",
+                    "maxChance",
+                    "neighborChance"
+            );
+            copyTransitionNumbers(
+                    current.getAsJsonObject("trampling"),
+                    submitted.getAsJsonObject("trampling"),
+                    "minimumWalks",
+                    "chance",
+                    "chanceIncrease",
+                    "maxChance",
+                    "neighborChance"
+            );
+            copyTransitionNumbers(
+                    current,
+                    submitted,
+                    "ticks",
+                    "chanceInterval",
+                    "chance",
+                    "chanceIncrease",
+                    "maxChance",
+                    "dryingDelay",
+                    "dryingInterval",
+                    "dryingChanceDecrease"
+            );
+
+            Settings validated = parse(current);
+            Files.writeString(
+                    temporaryPath,
+                    "// Saved by the Wild Paths config screen.\n" + PRETTY_GSON.toJson(current) + "\n"
+            );
+            try {
+                Files.move(
+                        temporaryPath,
+                        configPath,
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING
+                );
+            } catch (java.nio.file.AtomicMoveNotSupportedException ignored) {
+                Files.move(temporaryPath, configPath, StandardCopyOption.REPLACE_EXISTING);
+            }
+            settings = validated;
+            WildPaths.LOGGER.info("Saved settings from the config screen to {}", configPath);
+            return null;
+        } catch (Exception exception) {
+            try {
+                Files.deleteIfExists(temporaryPath);
+            } catch (Exception cleanupException) {
+                exception.addSuppressed(cleanupException);
+            }
+            WildPaths.LOGGER.error("Could not save settings from the config screen", exception);
+            return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+        }
+    }
+
     public static boolean wearRecoveryEnabled() {
         return settings.wearRecoveryEnabled();
     }
@@ -301,6 +448,14 @@ public final class WildPathsConfig {
         return false;
     }
 
+    public static boolean isTrafficMob(Entity entity) {
+        if (settings.trafficMobTypes().contains(entity.getType())) {
+            return true;
+        }
+        return settings.riddenTrafficMobTypes().contains(entity.getType())
+                && entity.getFirstPassenger() instanceof Player;
+    }
+
     private static Settings parse(Reader source) {
         return parse(parseRoot(source));
     }
@@ -327,6 +482,17 @@ public final class WildPathsConfig {
         int nearbyScanRadius = optionalRangedInt(processing, "nearbyScanRadius", 24, 0, 128);
         int nearbyScanDepth = optionalRangedInt(processing, "nearbyScanDepth", 6, 0, 64);
         int nearbyScanColumns = optionalRangedInt(processing, "nearbyScanColumnsPerPlayer", 128, 0, 10_000);
+
+        Set<EntityType<?>> trafficMobTypes = parseEntityTypeList(root, "trafficMobs");
+        Set<EntityType<?>> riddenTrafficMobTypes = parseEntityTypeList(root, "riddenTrafficMobs");
+        for (EntityType<?> entityType : trafficMobTypes) {
+            if (riddenTrafficMobTypes.contains(entityType)) {
+                throw new IllegalArgumentException(
+                        "An entity type cannot appear in both trafficMobs and riddenTrafficMobs: "
+                                + BuiltInRegistries.ENTITY_TYPE.getKey(entityType)
+                );
+            }
+        }
 
         JsonObject wearRecovery = root.getAsJsonObject("wearRecovery");
         if (wearRecovery == null) {
@@ -414,12 +580,13 @@ public final class WildPathsConfig {
             double chance = requiredProbability(object, "chance", false);
             double chanceIncrease = requiredProbability(object, "chanceIncrease", true);
             double maxChance = requiredProbability(object, "maxChance", false);
+            double neighborChance = optionalProbability(object, "neighborChance", 0.50, true);
             if (maxChance < chance) {
                 throw new IllegalArgumentException("Trampling maxChance must be at least chance");
             }
 
             TramplingRule transition = new TramplingRule(
-                    from, to, minimumWalks, chance, chanceIncrease, maxChance
+                    from, to, minimumWalks, chance, chanceIncrease, maxChance, neighborChance
             );
             if (tramplingTransitions.put(from, transition) != null) {
                 throw new IllegalArgumentException(
@@ -516,6 +683,8 @@ public final class WildPathsConfig {
                 nearbyScanRadius,
                 nearbyScanDepth,
                 nearbyScanColumns,
+                Set.copyOf(trafficMobTypes),
+                Set.copyOf(riddenTrafficMobTypes),
                 wearRecoveryEnabled,
                 wearRecoveryDelayTicks,
                 wearRecoveryIntervalTicks,
@@ -535,6 +704,14 @@ public final class WildPathsConfig {
 
         if (sourceVersion < 5) {
             migrateDefaultTrafficValues(existing);
+        }
+
+        if (sourceVersion < 7) {
+            addMissingTransitionProbability(
+                    existing.getAsJsonObject("trampling"),
+                    "neighborChance",
+                    0.50
+            );
         }
 
         JsonArray existingTransitions = existing.getAsJsonArray("transitions");
@@ -561,6 +738,26 @@ public final class WildPathsConfig {
 
         existing.addProperty("configVersion", CURRENT_CONFIG_VERSION);
         return existing;
+    }
+
+    private static void addMissingTransitionProbability(
+            JsonObject section,
+            String property,
+            double value
+    ) {
+        if (section == null) {
+            return;
+        }
+        JsonArray transitions = section.getAsJsonArray("transitions");
+        if (transitions == null) {
+            return;
+        }
+
+        for (JsonElement element : transitions) {
+            if (element.isJsonObject() && !element.getAsJsonObject().has(property)) {
+                element.getAsJsonObject().addProperty(property, value);
+            }
+        }
     }
 
     private static void migrateDefaultTrafficValues(JsonObject root) {
@@ -655,6 +852,75 @@ public final class WildPathsConfig {
                 && Double.compare(rule.get("chanceIncrease").getAsDouble(), chanceIncrease) == 0
                 && rule.has("maxChance")
                 && Double.compare(rule.get("maxChance").getAsDouble(), maxChance) == 0;
+    }
+
+    private static void copyTransitionNumbers(
+            JsonObject currentSection,
+            JsonObject submittedSection,
+            String... propertyNames
+    ) {
+        if (currentSection == null || submittedSection == null) {
+            return;
+        }
+        JsonArray currentTransitions = currentSection.getAsJsonArray("transitions");
+        JsonArray submittedTransitions = submittedSection.getAsJsonArray("transitions");
+        if (currentTransitions == null || submittedTransitions == null) {
+            return;
+        }
+
+        Map<String, JsonObject> submittedBySource = new LinkedHashMap<>();
+        for (JsonElement element : submittedTransitions) {
+            if (element.isJsonObject()
+                    && element.getAsJsonObject().has("from")
+                    && element.getAsJsonObject().get("from").isJsonPrimitive()
+                    && element.getAsJsonObject().get("from").getAsJsonPrimitive().isString()) {
+                JsonObject transition = element.getAsJsonObject();
+                submittedBySource.put(transition.get("from").getAsString(), transition);
+            }
+        }
+
+        for (JsonElement element : currentTransitions) {
+            if (!element.isJsonObject() || !element.getAsJsonObject().has("from")) {
+                continue;
+            }
+            JsonObject currentTransition = element.getAsJsonObject();
+            JsonObject submittedTransition = submittedBySource.get(
+                    currentTransition.get("from").getAsString()
+            );
+            copyNumericProperties(currentTransition, submittedTransition, propertyNames);
+        }
+    }
+
+    private static void copyNumericProperties(
+            JsonObject current,
+            JsonObject submitted,
+            String... propertyNames
+    ) {
+        if (current == null || submitted == null) {
+            return;
+        }
+        for (String propertyName : propertyNames) {
+            JsonElement value = submitted.get(propertyName);
+            if (current.has(propertyName)
+                    && value != null
+                    && value.isJsonPrimitive()
+                    && value.getAsJsonPrimitive().isNumber()) {
+                current.add(propertyName, value.deepCopy());
+            }
+        }
+    }
+
+    private static void copyStringArray(JsonObject current, JsonObject submitted, String propertyName) {
+        JsonArray submittedArray = submitted.getAsJsonArray(propertyName);
+        if (!current.has(propertyName) || submittedArray == null) {
+            return;
+        }
+        for (JsonElement element : submittedArray) {
+            if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+                throw new IllegalArgumentException(propertyName + " must contain only entity type strings");
+            }
+        }
+        current.add(propertyName, submittedArray.deepCopy());
     }
 
     private static void mergeMissing(JsonObject target, JsonObject defaults) {
@@ -853,6 +1119,32 @@ public final class WildPathsConfig {
         return BuiltInRegistries.BLOCK.get(id);
     }
 
+    private static EntityType<?> resolveEntityType(String name) {
+        ResourceLocation id = ResourceLocation.tryParse(name);
+        if (id == null || !BuiltInRegistries.ENTITY_TYPE.containsKey(id)) {
+            throw new IllegalArgumentException("Unknown entity type: " + name);
+        }
+        return BuiltInRegistries.ENTITY_TYPE.get(id);
+    }
+
+    private static Set<EntityType<?>> parseEntityTypeList(JsonObject root, String property) {
+        JsonArray entries = root.getAsJsonArray(property);
+        if (entries == null) {
+            throw new IllegalArgumentException("Missing " + property + " array");
+        }
+        Set<EntityType<?>> entityTypes = new LinkedHashSet<>();
+        for (JsonElement element : entries) {
+            if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+                throw new IllegalArgumentException("Each " + property + " entry must be an entity type string");
+            }
+            EntityType<?> entityType = resolveEntityType(element.getAsString());
+            if (!entityTypes.add(entityType)) {
+                throw new IllegalArgumentException("Duplicate " + property + " entry: " + element.getAsString());
+            }
+        }
+        return entityTypes;
+    }
+
     private static AllowedAbove resolveAllowedAbove(String name) {
         if (name.startsWith("#")) {
             ResourceLocation id = ResourceLocation.tryParse(name.substring(1));
@@ -871,6 +1163,8 @@ public final class WildPathsConfig {
             int nearbyScanRadius,
             int nearbyScanDepth,
             int nearbyScanColumnsPerPlayer,
+            Set<EntityType<?>> trafficMobTypes,
+            Set<EntityType<?>> riddenTrafficMobTypes,
             boolean wearRecoveryEnabled,
             long wearRecoveryDelayTicks,
             long wearRecoveryIntervalTicks,
@@ -893,4 +1187,5 @@ public final class WildPathsConfig {
     private WildPathsConfig() {
     }
 }
+
 

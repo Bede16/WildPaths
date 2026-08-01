@@ -22,6 +22,7 @@ Every player crossing contributes to the block being used. Walking back and fort
 
 - Supports configurable block-to-block transitions
 - Creates configurable, multi-stage paths from repeated player traffic
+- Lets configured mob types create and preserve paths and trample plants
 - Tramples tall grass into short grass and short grass into air in configurable stages
 - Gradually removes unfinished ground and plant wear after a configurable quiet period
 - Discovers matching surface blocks incrementally around players
@@ -50,13 +51,15 @@ Every player crossing contributes to the block being used. Walking back and fort
 
 Dedicated-server players do not need to install Wild Paths on their clients. Singleplayer installations place the JAR in the normal client `mods` directory because the integrated server runs inside the game.
 
+The optional graphical configuration screen requires [YetAnotherConfigLib (YACL) 3.8.2](https://www.curseforge.com/minecraft/mc-mods/yacl/files/7437845) on the client. Regular players joining a dedicated server still need neither Wild Paths nor YACL. Administrators who want to use `/wildpaths config` install both client-side; the server validates their permission before accepting changes.
+
 ## Configuration
 
 Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 supports comments and trailing commas. The default file is:
 
 ```json5
 {
-  configVersion: 6,
+  configVersion: 9,
 
   // Limits how much work Wild Paths performs at once.
   processing: {
@@ -67,6 +70,17 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
     nearbyScanDepth: 6,
     nearbyScanColumnsPerPlayer: 128,
   },
+
+  // These mob types create and preserve paths and trample plants like players.
+  // minecraft:villager includes both adult and baby villagers.
+  trafficMobs: [
+    "minecraft:villager",
+  ],
+
+  // These mob types count only while a player is riding them.
+  riddenTrafficMobs: [
+    "minecraft:horse",
+  ],
 
   // Unfinished traffic wear slowly disappears when nobody uses the block.
   // 24000 ticks are one Minecraft day while the dimension is running.
@@ -111,7 +125,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
     ],
   },
 
-  // Plants are worn down only by direct player traffic, not neighboring wear.
+  // Plants are worn down by direct and neighboring player traffic.
   trampling: {
     enabled: true,
     transitions: [
@@ -122,6 +136,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
         chance: 0.50,
         chanceIncrease: 0.25,
         maxChance: 1.0,
+        neighborChance: 0.50,
       },
       {
         from: "minecraft:short_grass",
@@ -130,6 +145,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
         chance: 0.35,
         chanceIncrease: 0.20,
         maxChance: 1.0,
+        neighborChance: 0.50,
       },
     ],
   },
@@ -187,15 +203,17 @@ Each `from` block may appear only once. `ticks` is the protected time before the
 
 Rain-dependent rules can gradually dry again. After `dryingDelay` without rain reaching the block, the accumulated probability falls by `dryingChanceDecrease` every `dryingInterval`, but never below the base `chance`. Rain resumes from the remaining probability. With the moss defaults, failed rainy rolls add 0.5 percentage points per minute up to 15%; after two dry minutes, one percentage point is removed per further minute.
 
-`pathCreation.transitions` contains the separate rules driven by player traffic. `minimumWalks` is the guaranteed number of crossings before any roll can happen. Each later crossing rolls `chance`, increases it by `chanceIncrease` after a failure, and caps it at `maxChance`. A successful transition clears all wear at that position, so the next configured stage always starts at zero. With the defaults this produces `grass_block` -> `dirt` -> `dirt_path`. Every player and every renewed crossing counts, including walking back and forth or landing after a jump. Standing still, flying, and creatures do not add repeated wear.
+`pathCreation.transitions` contains the separate rules driven by configured traffic. `minimumWalks` is the guaranteed number of crossings before any roll can happen. Each later crossing rolls `chance`, increases it by `chanceIncrease` after a failure, and caps it at `maxChance`. A successful transition clears all wear at that position, so the next configured stage always starts at zero. With the defaults this produces `grass_block` -> `dirt` -> `dirt_path`. Every player and every renewed crossing counts, including walking back and forth or landing after a jump. Standing still, flying, and unconfigured creatures do not add repeated wear.
+
+`trafficMobs` adds mob entity types that always use the same crossing, path creation, plant trampling, neighboring wear, wool protection, and dirt-path preservation rules as players. The default `minecraft:villager` entry covers adult and baby villagers. `riddenTrafficMobs` applies the same behavior only while a player is sitting on the listed mob; it contains `minecraft:horse` by default. A mob counts only when it enters or lands on another block; standing still does not add wear. Mob traffic does not run the larger nearby surface-discovery scan, which remains player-driven to keep village populations inexpensive. Both lists can be edited in the YACL screen or directly in JSON5.
 
 Path creation requires air above the affected block unless the block above matches `allowedAbove`. The whitelist accepts exact block IDs and block tags prefixed with `#`. It is empty by default; commented examples for flowers, grass, ferns, and dead bushes can be enabled individually. Other plants or modded blocks can be added without changing the mod.
 
-`trampling.transitions` uses the same protected-walk and increasing-probability model, but only for blocks a player directly moves through. The defaults produce `tall_grass` -> `short_grass` -> `air`; counts reset between both stages, tall grass's upper half is removed correctly, and neighboring wear never affects plants. Once the plant is gone, later traffic can begin wearing the ground underneath. The wool block underneath that ground protects both the plant and every ground stage.
+`trampling.transitions` uses the same protected-walk and increasing-probability model. The defaults produce `tall_grass` -> `short_grass` -> `air`; counts reset between both stages, tall grass's upper half is removed correctly, and each of the eight neighboring plants can receive wear according to its own `neighborChance`. Once the plant is gone, later traffic can begin wearing the ground underneath. The wool block underneath that ground protects both the plant and every ground stage.
 
 `wearRecovery` applies to unfinished path-creation and plant-trampling progress. After `delayTicks` without new traffic, `amountPerInterval` recorded walks and failed probability rolls are removed every `intervalTicks`. New traffic restarts the quiet period. Reaching zero removes the saved entry completely. A transition that already happened is not reversed: dirt remains dirt and short grass remains short grass, while vanilla Minecraft may still update suitable blocks normally. Set `enabled` to `false` to keep partial wear indefinitely.
 
-For every real crossing, each of the eight horizontal neighboring surface blocks independently receives one additional wear point with `neighborChance`. The search follows terrain one block upward or downward, never loads chunks, and still respects each neighbor's own `minimumWalks`, probability progression, and wool protection. Set `neighborChance` to `0.0` to disable spreading for a rule.
+For every real crossing, each of the eight horizontal neighboring surface blocks or plants independently receives one additional wear point with its rule's `neighborChance`. The search follows terrain one block upward or downward, never loads chunks, and still respects each neighbor's own `minimumWalks`, probability progression, and wool protection. Set `neighborChance` to `0.0` to disable spreading for a rule.
 
 Placing any color of wool directly underneath a block protects it from both path creation and timed transitions. Existing walk counters, probabilities, and decay timers for that block are cleared. Removing the wool removes the protection, and progress starts again from zero.
 
@@ -208,12 +226,15 @@ Placing any color of wool directly underneath a block protects it from both path
 Wild Paths provides these administrator commands (permission level 2):
 
 - `/wildpaths reload` reloads `wild_paths.json5` without restarting the server.
+- `/wildpaths config` opens the YACL number-field editor for an administrator with Wild Paths and YACL installed client-side.
 - `/wildpaths status` shows configured timed, path-creation, and trampling transitions plus tracked-block and processing statistics.
 - `/wildpaths debug <x> <y> <z>` shows timed, path-creation, or trampling progress for one loaded block.
 - `/wildpaths debug true` enables a compact live action-bar display for the block the player is looking at.
 - `/wildpaths debug false` disables the live display.
 
 The coordinate argument supports absolute and relative Minecraft coordinates, for example `/wildpaths debug ~ ~-1 ~`.
+
+The graphical editor exposes existing numeric values as text-entry fields, not sliders. It also provides editable entity-ID lists for always-active and player-ridden traffic mobs. It cannot add, remove, reorder, or rename block transitions and cannot change switches or transition block IDs. Saving updates the same `wild_paths.json5`; on a dedicated server, the server remains authoritative and accepts changes only from permission-level-2 administrators.
 
 ## Building
 
@@ -228,4 +249,5 @@ Every push and pull request runs the GitHub build and stores the matching JAR as
 ## License
 
 Wild Paths is available under the GNU General Public License v3.0.
+
 
