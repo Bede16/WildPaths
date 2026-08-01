@@ -7,7 +7,7 @@ public final class WildPathsClient {
     public static void register(ModContainer modContainer) {
         modContainer.registerExtensionPoint(
                 IConfigScreenFactory.class,
-                () -> (container, parent) -> WildPathsConfigScreen.createLocal(parent)
+                (IConfigScreenFactory) (container, parent) -> WildPathsConfigScreen.createLocal(parent)
         );
     }
 
