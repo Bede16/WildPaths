@@ -88,7 +88,8 @@ public final class WildPathsConfigScreen {
                 "Plant trampling",
                 RuleKind.TRAMPLING
         ));
-        builder.category(timedCategory(root));
+        builder.category(decayCategory(root));
+        builder.category(mossCategory(root));
 
         return builder
                 .save(() -> saver.save(GSON.toJson(root)))
@@ -175,7 +176,7 @@ public final class WildPathsConfigScreen {
     }
 
     private static ListOption<String> transitionPairList(JsonObject container, RuleKind kind) {
-        List<String> initial = readTransitionPairs(container);
+        List<String> initial = readTransitionPairs(container, kind);
         return ListOption.<String>createBuilder()
                 .name(Component.literal("Transition order (from -> to)"))
                 .description(OptionDescription.of(Component.literal(
@@ -184,7 +185,7 @@ public final class WildPathsConfigScreen {
                 )))
                 .binding(
                         List.copyOf(initial),
-                        () -> readTransitionPairs(container),
+                        () -> readTransitionPairs(container, kind),
                         values -> writeTransitionPairs(container, values, kind)
                 )
                 .controller(StringControllerBuilder::create)
@@ -194,14 +195,16 @@ public final class WildPathsConfigScreen {
                 .build();
     }
 
-    private static List<String> readTransitionPairs(JsonObject container) {
+    private static List<String> readTransitionPairs(JsonObject container, RuleKind kind) {
         List<String> values = new ArrayList<>();
         JsonArray transitions = container.getAsJsonArray("transitions");
         if (transitions != null) {
             for (JsonElement element : transitions) {
                 if (element.isJsonObject()) {
                     JsonObject rule = element.getAsJsonObject();
-                    values.add(rule.get("from").getAsString() + " -> " + rule.get("to").getAsString());
+                    if (belongsToKind(rule, kind)) {
+                        values.add(rule.get("from").getAsString() + " -> " + rule.get("to").getAsString());
+                    }
                 }
             }
         }
@@ -217,6 +220,9 @@ public final class WildPathsConfigScreen {
                     continue;
                 }
                 JsonObject rule = element.getAsJsonObject();
+                if (!belongsToKind(rule, kind)) {
+                    continue;
+                }
                 existing.put(
                         rule.get("from").getAsString() + " -> " + rule.get("to").getAsString(),
                         rule
@@ -224,12 +230,34 @@ public final class WildPathsConfigScreen {
             }
         }
 
-        JsonArray updated = new JsonArray();
+        JsonArray replacements = new JsonArray();
         for (String value : values) {
             TransitionPair pair = parseTransitionPair(value);
             String key = pair.from() + " -> " + pair.to();
             JsonObject rule = existing.get(key);
-            updated.add(rule == null ? createDefaultRule(pair, kind) : rule);
+            replacements.add(rule == null ? createDefaultRule(pair, kind) : rule);
+        }
+
+        JsonArray updated = new JsonArray();
+        boolean replacementsAdded = false;
+        if (current != null) {
+            for (JsonElement element : current) {
+                if (element.isJsonObject() && belongsToKind(element.getAsJsonObject(), kind)) {
+                    if (!replacementsAdded) {
+                        for (JsonElement replacement : replacements) {
+                            updated.add(replacement);
+                        }
+                        replacementsAdded = true;
+                    }
+                    continue;
+                }
+                updated.add(element);
+            }
+        }
+        if (!replacementsAdded) {
+            for (JsonElement replacement : replacements) {
+                updated.add(replacement);
+            }
         }
         container.add("transitions", updated);
     }
@@ -251,18 +279,18 @@ public final class WildPathsConfigScreen {
         JsonObject rule = new JsonObject();
         rule.addProperty("from", pair.from());
         rule.addProperty("to", pair.to());
-        if (kind == RuleKind.TIMED) {
+        if (kind == RuleKind.TIMED || kind == RuleKind.MOSS) {
             rule.addProperty("ticks", 0L);
             rule.addProperty("chanceInterval", 1200L);
-            rule.addProperty("chance", 0.01);
-            rule.addProperty("chanceIncrease", 0.01);
-            rule.addProperty("maxChance", 0.25);
-            rule.addProperty("requiresRain", false);
+            rule.addProperty("chance", kind == RuleKind.MOSS ? 0.005 : 0.01);
+            rule.addProperty("chanceIncrease", kind == RuleKind.MOSS ? 0.005 : 0.01);
+            rule.addProperty("maxChance", kind == RuleKind.MOSS ? 0.15 : 0.25);
+            rule.addProperty("requiresRain", kind == RuleKind.MOSS);
             rule.addProperty("dryingDelay", 2400L);
             rule.addProperty("dryingInterval", 1200L);
-            rule.addProperty("dryingChanceDecrease", 0.0);
-            rule.addProperty("spreadChance", 0.0);
-            rule.addProperty("resetOnWalk", true);
+            rule.addProperty("dryingChanceDecrease", kind == RuleKind.MOSS ? 0.01 : 0.0);
+            rule.addProperty("spreadChance", kind == RuleKind.MOSS ? 0.02 : 0.0);
+            rule.addProperty("resetOnWalk", kind != RuleKind.MOSS);
             rule.addProperty("neighborResetChance", 0.0);
             rule.addProperty("discoverNearby", true);
         } else {
@@ -294,13 +322,16 @@ public final class WildPathsConfigScreen {
         root.add(property, array);
     }
 
-    private static ConfigCategory timedCategory(JsonObject root) {
+    private static ConfigCategory decayCategory(JsonObject root) {
         ConfigCategory.Builder category = ConfigCategory.createBuilder()
-                .name(Component.literal("Decay and moss"));
+                .name(Component.literal("Path decay"));
         category.group(transitionPairList(root, RuleKind.TIMED));
         JsonArray transitions = root.getAsJsonArray("transitions");
         for (JsonElement element : transitions) {
             JsonObject transition = element.getAsJsonObject();
+            if (!belongsToKind(transition, RuleKind.TIMED)) {
+                continue;
+            }
             OptionGroup.Builder group = OptionGroup.createBuilder()
                     .name(Component.literal(ruleName(transition)));
             addLong(group, transition, "ticks", "Protected time (ticks)", 0L, MAX_TICKS);
@@ -319,6 +350,67 @@ public final class WildPathsConfigScreen {
             category.group(group.build());
         }
         return category.build();
+    }
+
+    private static ConfigCategory mossCategory(JsonObject root) {
+        ConfigCategory.Builder category = ConfigCategory.createBuilder()
+                .name(Component.literal("Moss growth"));
+        category.group(transitionPairList(root, RuleKind.MOSS));
+
+        List<JsonObject> mossRules = matchingRules(root, RuleKind.MOSS);
+        if (!mossRules.isEmpty()) {
+            OptionGroup.Builder shared = OptionGroup.createBuilder()
+                    .name(Component.literal("Settings for all moss blocks"));
+            addSharedLong(shared, mossRules, "ticks", "Protected time (ticks)", 0L, MAX_TICKS);
+            addSharedLong(shared, mossRules, "chanceInterval", "Chance interval (ticks)", 1L, MAX_TICKS);
+            addSharedDouble(shared, mossRules, "chance", "Initial chance (0-1)", 0.000001, 1.0);
+            addSharedDouble(shared, mossRules, "chanceIncrease", "Chance increase (0-1)", 0.0, 1.0);
+            addSharedDouble(shared, mossRules, "maxChance", "Maximum chance (0-1)", 0.000001, 1.0);
+            addSharedLong(shared, mossRules, "dryingDelay", "Drying delay (ticks)", 0L, MAX_TICKS);
+            addSharedLong(shared, mossRules, "dryingInterval", "Drying interval (ticks)", 1L, MAX_TICKS);
+            addSharedDouble(shared, mossRules, "dryingChanceDecrease", "Drying decrease (0-1)", 0.0, 1.0);
+            addSharedDouble(shared, mossRules, "spreadChance", "Adjacent moss bonus (0-1)", 0.0, 1.0);
+            addSharedDouble(shared, mossRules, "neighborResetChance", "Neighbor reset chance (0-1)", 0.0, 1.0);
+            addSharedBoolean(shared, mossRules, "requiresRain", "Requires rain");
+            addSharedBoolean(shared, mossRules, "resetOnWalk", "Reset on traffic");
+            addSharedBoolean(shared, mossRules, "discoverNearby", "Discover near players");
+            category.group(shared.build());
+        }
+        return category.build();
+    }
+
+    private static List<JsonObject> matchingRules(JsonObject container, RuleKind kind) {
+        List<JsonObject> rules = new ArrayList<>();
+        JsonArray transitions = container.getAsJsonArray("transitions");
+        if (transitions != null) {
+            for (JsonElement element : transitions) {
+                if (element.isJsonObject() && belongsToKind(element.getAsJsonObject(), kind)) {
+                    rules.add(element.getAsJsonObject());
+                }
+            }
+        }
+        return rules;
+    }
+
+    private static boolean belongsToKind(JsonObject rule, RuleKind kind) {
+        if (kind != RuleKind.TIMED && kind != RuleKind.MOSS) {
+            return true;
+        }
+        boolean moss = isMossRule(rule);
+        return kind == RuleKind.MOSS ? moss : !moss;
+    }
+
+    private static boolean isMossRule(JsonObject rule) {
+        if (!rule.has("to")) {
+            return false;
+        }
+        String target = rule.get("to").getAsString();
+        int separator = target.indexOf(':');
+        String path = separator >= 0 ? target.substring(separator + 1) : target;
+        boolean mossTarget = path.startsWith("mossy_");
+        boolean mossSpread = rule.has("spreadChance") && rule.get("spreadChance").getAsDouble() > 0.0;
+        boolean rainRequired = rule.has("requiresRain") && rule.get("requiresRain").getAsBoolean();
+        return mossTarget || (rainRequired && mossSpread);
     }
 
     private static void addInteger(
@@ -391,6 +483,76 @@ public final class WildPathsConfigScreen {
         parent.add(Option.<Boolean>createBuilder()
                 .name(Component.literal(label))
                 .binding(initial, () -> object.get(property).getAsBoolean(), value -> object.addProperty(property, value))
+                .controller(BooleanControllerBuilder::create)
+                .build());
+    }
+
+    private static void addSharedLong(
+            OptionGroup.Builder parent,
+            List<JsonObject> objects,
+            String property,
+            String label,
+            long minimum,
+            long maximum
+    ) {
+        JsonObject first = objects.getFirst();
+        long initial = first.get(property).getAsLong();
+        parent.option(Option.<Long>createBuilder()
+                .name(Component.literal(label))
+                .description(OptionDescription.of(Component.literal(
+                        "This value is applied to every moss transition."
+                )))
+                .binding(
+                        initial,
+                        () -> first.get(property).getAsLong(),
+                        value -> objects.forEach(object -> object.addProperty(property, value))
+                )
+                .controller(option -> LongFieldControllerBuilder.create(option).range(minimum, maximum))
+                .build());
+    }
+
+    private static void addSharedDouble(
+            OptionGroup.Builder parent,
+            List<JsonObject> objects,
+            String property,
+            String label,
+            double minimum,
+            double maximum
+    ) {
+        JsonObject first = objects.getFirst();
+        double initial = first.get(property).getAsDouble();
+        parent.option(Option.<Double>createBuilder()
+                .name(Component.literal(label))
+                .description(OptionDescription.of(Component.literal(
+                        "This value is applied to every moss transition."
+                )))
+                .binding(
+                        initial,
+                        () -> first.get(property).getAsDouble(),
+                        value -> objects.forEach(object -> object.addProperty(property, value))
+                )
+                .controller(option -> DoubleFieldControllerBuilder.create(option).range(minimum, maximum))
+                .build());
+    }
+
+    private static void addSharedBoolean(
+            OptionGroup.Builder parent,
+            List<JsonObject> objects,
+            String property,
+            String label
+    ) {
+        JsonObject first = objects.getFirst();
+        boolean initial = first.get(property).getAsBoolean();
+        parent.option(Option.<Boolean>createBuilder()
+                .name(Component.literal(label))
+                .description(OptionDescription.of(Component.literal(
+                        "This value is applied to every moss transition."
+                )))
+                .binding(
+                        initial,
+                        () -> first.get(property).getAsBoolean(),
+                        value -> objects.forEach(object -> object.addProperty(property, value))
+                )
                 .controller(BooleanControllerBuilder::create)
                 .build());
     }
@@ -481,7 +643,8 @@ public final class WildPathsConfigScreen {
     private enum RuleKind {
         PATH_CREATION,
         TRAMPLING,
-        TIMED
+        TIMED,
+        MOSS
     }
 
     private record TransitionPair(String from, String to) {
