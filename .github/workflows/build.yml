@@ -28,3 +28,10 @@ jobs:
 
       - name: Build with Gradle
         run: ./gradlew build
+
+      - name: Upload Wild Paths mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: WildPaths-1.2.0
+          path: build/libs/wild_paths-1.2.0.jar
+          if-no-files-found: error
