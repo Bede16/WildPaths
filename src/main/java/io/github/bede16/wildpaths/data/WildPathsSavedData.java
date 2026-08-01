@@ -1,6 +1,8 @@
 package io.github.bede16.wildpaths.data;
 
 import io.github.bede16.wildpaths.WildPaths;
+import io.github.bede16.wildpaths.config.TransitionRule;
+import io.github.bede16.wildpaths.config.WildPathsConfig;
 import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 import net.minecraft.core.BlockPos;
@@ -9,7 +11,6 @@ import net.minecraft.core.SectionPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.saveddata.SavedData;
 
 public final class WildPathsSavedData extends SavedData {
@@ -53,7 +54,7 @@ public final class WildPathsSavedData extends SavedData {
         setDirty();
     }
 
-    public int process(ServerLevel level, long gameTime, long decayTicks, int maxChecks) {
+    public int process(ServerLevel level, long gameTime, int maxChecks) {
         int checks = Math.min(maxChecks, checkQueue.size());
         int decayed = 0;
 
@@ -72,14 +73,20 @@ public final class WildPathsSavedData extends SavedData {
                 continue;
             }
 
-            if (!level.getBlockState(pos).is(Blocks.DIRT_PATH)) {
+            TransitionRule transition = WildPathsConfig.find(level.getBlockState(pos));
+            if (transition == null) {
                 lastUses.remove(packedPos);
                 setDirty();
                 continue;
             }
 
-            if (gameTime - lastUses.get(packedPos) >= decayTicks) {
-                level.setBlock(pos, Blocks.DIRT.defaultBlockState(), Block.UPDATE_ALL);
+            if (gameTime - lastUses.get(packedPos) >= transition.ticks()) {
+                if (transition.requiresRain() && !level.isRainingAt(pos.above())) {
+                    checkQueue.enqueue(packedPos);
+                    continue;
+                }
+
+                level.setBlock(pos, transition.to().defaultBlockState(), Block.UPDATE_ALL);
                 lastUses.remove(packedPos);
                 setDirty();
                 decayed++;
