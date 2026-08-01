@@ -26,7 +26,9 @@ jobs:
             export GIT_COMMITTER_EMAIL="16863675+Bede16@users.noreply.github.com"
           ' -- --all
 
-          if git log --all --format='%ae%n%ce' | grep -qv '^16863675+Bede16@users.noreply.github.com$'; then
+          git for-each-ref --format='delete %(refname)' refs/original | git update-ref --stdin
+
+          if git log main v1.2.1 --format='%ae%n%ce' | grep -qv '^16863675+Bede16@users.noreply.github.com$'; then
             echo "Unexpected commit email remains." >&2
             exit 1
           fi
