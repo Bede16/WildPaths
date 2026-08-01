@@ -2,6 +2,9 @@ name: Build
 
 on: [push, pull_request]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -29,9 +32,32 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew build
 
+      - name: Read mod version
+        id: mod_version
+        shell: bash
+        run: echo "value=$(sed -n 's/^mod_version=//p' gradle.properties)" >> "$GITHUB_OUTPUT"
+
       - name: Upload Wild Paths mod
         uses: actions/upload-artifact@v4
         with:
-          name: WildPaths-1.2.0
-          path: build/libs/wild_paths-1.2.0.jar
+          name: WildPaths-${{ steps.mod_version.outputs.value }}
+          path: build/libs/wild_paths-${{ steps.mod_version.outputs.value }}.jar
           if-no-files-found: error
+
+      - name: Publish new version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MOD_VERSION: ${{ steps.mod_version.outputs.value }}
+        shell: bash
+        run: |
+          tag="v${MOD_VERSION}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; leaving it unchanged."
+          else
+            gh release create "$tag" \
+              "build/libs/wild_paths-${MOD_VERSION}.jar#Wild Paths ${MOD_VERSION}" \
+              --target "$GITHUB_SHA" \
+              --title "Wild Paths ${MOD_VERSION}" \
+              --generate-notes
+          fi
