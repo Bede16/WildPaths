@@ -4,6 +4,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.stream.JsonReader;
 import io.github.bede16.wildpaths.WildPaths;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -16,15 +18,20 @@ import java.io.Reader;
 import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Loads all Wild Paths settings from one JSON5 file. */
 public final class WildPathsConfig {
     public static final String FILE_NAME = "wild_paths.json5";
+    private static final int CURRENT_CONFIG_VERSION = 2;
+    private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
 
     private static final String DEFAULT_JSON5 = """
             {
+              configVersion: 2,
+
               // Limits how much work Wild Paths performs at once.
               processing: {
                 checkInterval: 200,
@@ -35,7 +42,7 @@ public final class WildPathsConfig {
                 nearbyScanColumnsPerPlayer: 128,
               },
 
-              // A block is observed only after a player walks on it.
+              // Matching surface blocks are discovered gradually near active players.
               transitions: [
                 {
                   from: "minecraft:dirt_path",
@@ -85,9 +92,26 @@ public final class WildPathsConfig {
                 Files.writeString(configPath, DEFAULT_JSON5);
             }
 
+            JsonObject root;
             try (Reader reader = Files.newBufferedReader(configPath)) {
-                settings = parse(reader);
+                root = parseRoot(reader);
             }
+
+            int fileVersion = root.has("configVersion") ? root.get("configVersion").getAsInt() : 1;
+            if (fileVersion < CURRENT_CONFIG_VERSION) {
+                Path backupPath = configPath.resolveSibling(FILE_NAME + ".before-v" + CURRENT_CONFIG_VERSION + ".backup");
+                if (Files.notExists(backupPath)) {
+                    Files.copy(configPath, backupPath, StandardCopyOption.COPY_ATTRIBUTES);
+                }
+
+                root = migrate(root);
+                Files.writeString(configPath, renderJson5(root));
+                WildPaths.LOGGER.info("Updated {} from config version {} to {}. Backup: {}", configPath, fileVersion, CURRENT_CONFIG_VERSION, backupPath);
+            } else if (fileVersion > CURRENT_CONFIG_VERSION) {
+                WildPaths.LOGGER.warn("{} uses config version {}, but this Wild Paths release supports version {}", configPath, fileVersion, CURRENT_CONFIG_VERSION);
+            }
+
+            settings = parse(root);
             WildPaths.LOGGER.info("Loaded {} Wild Paths transitions from {}", settings.transitions().size(), configPath);
         } catch (Exception exception) {
             WildPaths.LOGGER.error("Could not load {}. Using built-in defaults.", configPath, exception);
@@ -124,14 +148,20 @@ public final class WildPathsConfig {
     }
 
     private static Settings parse(Reader source) {
+        return parse(parseRoot(source));
+    }
+
+    private static JsonObject parseRoot(Reader source) {
         JsonReader reader = new JsonReader(new StringReader(normalizeJson5(readAll(source))));
         reader.setLenient(true);
         JsonElement rootElement = JsonParser.parseReader(reader);
         if (!rootElement.isJsonObject()) {
             throw new IllegalArgumentException("The config root must be an object");
         }
+        return rootElement.getAsJsonObject();
+    }
 
-        JsonObject root = rootElement.getAsJsonObject();
+    private static Settings parse(JsonObject root) {
         JsonObject processing = root.getAsJsonObject("processing");
         if (processing == null) {
             throw new IllegalArgumentException("Missing processing object");
@@ -208,6 +238,52 @@ public final class WildPathsConfig {
                 nearbyScanColumns,
                 Map.copyOf(transitions)
         );
+    }
+
+    private static JsonObject migrate(JsonObject existing) {
+        JsonObject defaults = parseRoot(new StringReader(DEFAULT_JSON5));
+        mergeMissing(existing, defaults);
+
+        JsonArray existingTransitions = existing.getAsJsonArray("transitions");
+        JsonArray defaultTransitions = defaults.getAsJsonArray("transitions");
+        if (existingTransitions != null && defaultTransitions != null) {
+            Map<String, JsonObject> defaultsByBlock = new LinkedHashMap<>();
+            for (JsonElement element : defaultTransitions) {
+                if (element.isJsonObject() && element.getAsJsonObject().has("from")) {
+                    defaultsByBlock.put(element.getAsJsonObject().get("from").getAsString(), element.getAsJsonObject());
+                }
+            }
+
+            for (JsonElement element : existingTransitions) {
+                if (!element.isJsonObject() || !element.getAsJsonObject().has("from")) {
+                    continue;
+                }
+                JsonObject transition = element.getAsJsonObject();
+                JsonObject transitionDefaults = defaultsByBlock.get(transition.get("from").getAsString());
+                if (transitionDefaults != null) {
+                    mergeMissing(transition, transitionDefaults);
+                }
+            }
+        }
+
+        existing.addProperty("configVersion", CURRENT_CONFIG_VERSION);
+        return existing;
+    }
+
+    private static void mergeMissing(JsonObject target, JsonObject defaults) {
+        for (Map.Entry<String, JsonElement> entry : defaults.entrySet()) {
+            if (!target.has(entry.getKey())) {
+                target.add(entry.getKey(), entry.getValue().deepCopy());
+            } else if (target.get(entry.getKey()).isJsonObject() && entry.getValue().isJsonObject()) {
+                mergeMissing(target.getAsJsonObject(entry.getKey()), entry.getValue().getAsJsonObject());
+            }
+        }
+    }
+
+    private static String renderJson5(JsonObject root) {
+        return "// Automatically migrated by Wild Paths. The previous file is stored next to this one.\n"
+                + PRETTY_GSON.toJson(root)
+                + "\n";
     }
 
     private static String readAll(Reader source) {
@@ -369,3 +445,4 @@ public final class WildPathsConfig {
     private WildPathsConfig() {
     }
 }
+
