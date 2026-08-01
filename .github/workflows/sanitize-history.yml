@@ -26,6 +26,7 @@ jobs:
           cd ../sanitized.git
           git config http.https://github.com/.extraheader "$auth_header"
           git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git config remote.origin.mirror false
 
           git filter-branch --force --env-filter '
             export GIT_AUTHOR_NAME="Bede16"
