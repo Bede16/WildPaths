@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.1
+
+- Separate path-decay and moss-growth settings into dedicated YACL categories
+- Use one shared set of YACL values for every configured moss transition
+- Keep decay and moss transition pairs independently editable and extensible
+- Add the selected Wild Paths logo to the mod metadata and README
+
 ## 2.2.0
 
 - Let each neighboring dirt path reset its decay timer with a configurable 50% chance per crossing

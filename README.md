@@ -1,5 +1,7 @@
 # Wild Paths
 
+<img src="src/main/resources/wild_paths.png" alt="Wild Paths logo" width="256">
+
 Wild Paths is a lightweight server-side NeoForge mod for Minecraft 1.21.1. Repeated player traffic can form paths, unused dirt paths can recover, and stone can slowly become mossy during rain. Vanilla Minecraft can then continue updating the resulting blocks normally.
 
 ## How it works

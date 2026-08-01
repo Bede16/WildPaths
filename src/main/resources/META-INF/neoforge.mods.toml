@@ -8,6 +8,7 @@ modId="${mod_id}"
 version="${mod_version}"
 displayName="${mod_name}"
 displayURL="https://github.com/Bede16/WildPaths"
+logoFile="wild_paths.png"
 authors="Bede16"
 description='''
 Creates and recovers natural paths from player traffic, tramples vegetation, and ages exposed blocks through configurable transitions.
@@ -33,4 +34,3 @@ type="required"
 versionRange="[3.8.2,)"
 ordering="NONE"
 side="CLIENT"
-
