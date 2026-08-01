@@ -138,6 +138,18 @@ public final class WildPathsSavedData extends SavedData {
         return lastUses.size();
     }
 
+    public TrackedEntry trackedEntry(BlockPos pos) {
+        long packedPos = pos.asLong();
+        if (!lastUses.containsKey(packedPos)) {
+            return null;
+        }
+        return new TrackedEntry(
+                lastUses.get(packedPos),
+                lastAttempts.get(packedPos),
+                failedAttempts.get(packedPos)
+        );
+    }
+
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
         long[] positions = new long[lastUses.size()];
@@ -167,5 +179,8 @@ public final class WildPathsSavedData extends SavedData {
         lastAttempts.remove(packedPos);
         failedAttempts.remove(packedPos);
         setDirty();
+    }
+
+    public record TrackedEntry(long lastUse, long lastAttempt, int failedAttempts) {
     }
 }

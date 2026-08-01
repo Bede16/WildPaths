@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0
+
+- Add `/wildpaths reload` for configuration changes without a server restart
+- Add `/wildpaths status` for tracking and processing statistics
+- Add `/wildpaths debug <x> <y> <z>` for detailed per-block transition diagnostics
+
 ## 1.2.1
 
 - Reliably reset dirt-path decay when walking on the slightly lower path block

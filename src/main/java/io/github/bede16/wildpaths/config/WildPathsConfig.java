@@ -83,7 +83,7 @@ public final class WildPathsConfig {
 
     private static volatile Settings settings = new Settings(200, 1_024, false, 24, 6, 128, Map.of());
 
-    public static synchronized void load() {
+    public static synchronized boolean load() {
         Path configPath = FMLPaths.CONFIGDIR.get().resolve(FILE_NAME);
 
         try {
@@ -113,9 +113,11 @@ public final class WildPathsConfig {
 
             settings = parse(root);
             WildPaths.LOGGER.info("Loaded {} Wild Paths transitions from {}", settings.transitions().size(), configPath);
+            return true;
         } catch (Exception exception) {
             WildPaths.LOGGER.error("Could not load {}. Using built-in defaults.", configPath, exception);
             settings = parse(new StringReader(DEFAULT_JSON5));
+            return false;
         }
     }
 
@@ -141,6 +143,10 @@ public final class WildPathsConfig {
 
     public static int nearbyScanColumnsPerPlayer() {
         return settings.nearbyScanColumnsPerPlayer();
+    }
+
+    public static int transitionCount() {
+        return settings.transitions().size();
     }
 
     public static TransitionRule find(BlockState state) {

@@ -1,6 +1,7 @@
 package io.github.bede16.wildpaths.event;
 
 import io.github.bede16.wildpaths.WildPaths;
+import io.github.bede16.wildpaths.command.WildPathsCommands;
 import io.github.bede16.wildpaths.config.TransitionRule;
 import io.github.bede16.wildpaths.config.WildPathsConfig;
 import io.github.bede16.wildpaths.data.WildPathsSavedData;
@@ -11,6 +12,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
@@ -22,6 +24,11 @@ import java.util.UUID;
 public final class WildPathsEvents {
     private static final int PLAYER_SAMPLE_INTERVAL = 20;
     private final Map<UUID, Integer> scanCursors = new HashMap<>();
+
+    @SubscribeEvent
+    public void onRegisterCommands(RegisterCommandsEvent event) {
+        WildPathsCommands.register(event.getDispatcher());
+    }
 
     @SubscribeEvent
     public void onPlayerTick(PlayerTickEvent.Post event) {

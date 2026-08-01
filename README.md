@@ -80,9 +80,19 @@ Wild Paths creates one configuration file, `config/wild_paths.json5`, on the fir
 
 Each `from` block may appear only once. `ticks` is the protected time before the first roll. `chanceInterval` controls the delay between rolls. `chance` is the initial probability from greater than `0.0` through `1.0`; `chanceIncrease` is added after each failed roll, up to `maxChance`. Walking on a rule with `resetOnWalk` restarts its protected time and probability. When `requiresRain` is enabled, a roll only happens while rain can reach the block.
 
-`discoverNearby` lets the bounded surface scanner find blocks without requiring a player to step directly on them. Each second it checks at most `nearbyScanColumnsPerPlayer` columns within `nearbyScanRadius`, and only `nearbyScanDepth` blocks below the surface. It skips unloaded chunks. Setting the column count to `0` disables nearby discovery. With very large tracking sets, a block can change later because work is intentionally spread across multiple processing passes. Restart the server after editing the JSON5 file.
+`discoverNearby` lets the bounded surface scanner find blocks without requiring a player to step directly on them. Each second it checks at most `nearbyScanColumnsPerPlayer` columns within `nearbyScanRadius`, and only `nearbyScanDepth` blocks below the surface. It skips unloaded chunks. Setting the column count to `0` disables nearby discovery. With very large tracking sets, a block can change later because work is intentionally spread across multiple processing passes. Run `/wildpaths reload` or restart the server after editing the JSON5 file.
 
 `configVersion` is managed by Wild Paths. When a newer mod release needs a newer configuration structure, the file is upgraded automatically on server start. Existing values and custom transitions are retained, and the original file is saved beside it as `wild_paths.json5.before-vN.backup`. A newer config is never automatically downgraded by an older mod release.
+
+## Commands
+
+Wild Paths provides these administrator commands (permission level 2):
+
+- `/wildpaths reload` reloads `wild_paths.json5` without restarting the server.
+- `/wildpaths status` shows the number of configured transitions, tracked blocks, enabled dimensions, and current processing limits.
+- `/wildpaths debug <x> <y> <z>` shows the transition, remaining protected time, next roll, failed rolls, current chance, and rain state for one loaded block.
+
+The coordinate argument supports absolute and relative Minecraft coordinates, for example `/wildpaths debug ~ ~-1 ~`.
 
 ## Building
 
