@@ -57,7 +57,7 @@ The optional graphical configuration screen requires [YetAnotherConfigLib (YACL)
 
 ## Configuration
 
-Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 supports comments and trailing commas. The default file is:
+Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 supports comments and trailing commas. A fully annotated example, including optional values with their defaults, is:
 
 ```json5
 {
@@ -181,6 +181,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       dryingDelay: 2400,
       dryingInterval: 1200,
       dryingChanceDecrease: 0.01,
+      spreadChance: 0.02,
       resetOnWalk: false,
       neighborResetChance: 0.0,
       discoverNearby: true,
@@ -197,6 +198,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       dryingDelay: 2400,
       dryingInterval: 1200,
       dryingChanceDecrease: 0.01,
+      spreadChance: 0.02,
       resetOnWalk: false,
       neighborResetChance: 0.0,
       discoverNearby: true,
@@ -213,6 +215,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       dryingDelay: 2400,
       dryingInterval: 1200,
       dryingChanceDecrease: 0.01,
+      spreadChance: 0.02,
       resetOnWalk: false,
       neighborResetChance: 0.0,
       discoverNearby: true,
@@ -229,6 +232,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       dryingDelay: 2400,
       dryingInterval: 1200,
       dryingChanceDecrease: 0.01,
+      spreadChance: 0.02,
       resetOnWalk: false,
       neighborResetChance: 0.0,
       discoverNearby: true,
@@ -245,6 +249,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       dryingDelay: 2400,
       dryingInterval: 1200,
       dryingChanceDecrease: 0.01,
+      spreadChance: 0.02,
       resetOnWalk: false,
       neighborResetChance: 0.0,
       discoverNearby: true,
@@ -261,6 +266,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       dryingDelay: 2400,
       dryingInterval: 1200,
       dryingChanceDecrease: 0.01,
+      spreadChance: 0.02,
       resetOnWalk: false,
       neighborResetChance: 0.0,
       discoverNearby: true,
@@ -277,6 +283,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       dryingDelay: 2400,
       dryingInterval: 1200,
       dryingChanceDecrease: 0.01,
+      spreadChance: 0.02,
       resetOnWalk: false,
       neighborResetChance: 0.0,
       discoverNearby: true,
@@ -293,6 +300,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       dryingDelay: 2400,
       dryingInterval: 1200,
       dryingChanceDecrease: 0.01,
+      spreadChance: 0.02,
       resetOnWalk: false,
       neighborResetChance: 0.0,
       discoverNearby: true,
@@ -338,7 +346,7 @@ Wild Paths provides these administrator commands (permission level 2):
 
 The coordinate argument supports absolute and relative Minecraft coordinates, for example `/wildpaths debug ~ ~-1 ~`.
 
-The graphical editor exposes numbers as text-entry fields rather than sliders and covers the complete Wild Paths rule set: processing and feature switches, allowed-above entries, traffic-mob lists, transition block IDs, rule order, and every per-rule value. Transition lists use `namespace:block -> namespace:block`; entries can be added, renamed, removed, and reordered. New or renamed rules receive safe defaults, so save and reopen the screen once to edit their detail fields. Saving updates the same `wild_paths.json5`; on a dedicated server, the server remains authoritative, validates the complete submitted configuration, and accepts changes only from permission-level-2 administrators.
+The graphical editor exposes numbers as text-entry fields rather than sliders. Its settings are separated into **Traffic mobs**, **Processing**, **Wear recovery**, **Path creation**, **Plant trampling**, **Path decay**, and **Moss growth**. Path-decay values remain editable per transition. Moss growth uses one shared set of timing, probability, rain, drying, spreading, reset, and discovery values that is applied to every configured moss transition. Transition lists use `namespace:block -> namespace:block`; entries can be added, renamed, removed, and reordered. New or renamed rules receive safe defaults, so save and reopen the screen once to edit their detail fields. Saving updates the same `wild_paths.json5`; on a dedicated server, the server remains authoritative, validates the complete submitted configuration, and accepts changes only from permission-level-2 administrators.
 
 ## Building
 
