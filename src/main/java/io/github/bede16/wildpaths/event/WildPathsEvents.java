@@ -36,7 +36,7 @@ public final class WildPathsEvents {
         }
 
         WildPathsSavedData data = WildPathsSavedData.get(level);
-        BlockPos observedPos = player.blockPosition().below();
+        BlockPos observedPos = walkedBlockPos(player, level);
         TransitionRule walkedTransition = WildPathsConfig.find(level.getBlockState(observedPos));
         if (walkedTransition != null) {
             if (walkedTransition.resetOnWalk()) {
@@ -82,6 +82,14 @@ public final class WildPathsEvents {
 
     private static boolean isEnabled(ServerLevel level) {
         return !WildPathsConfig.onlyOverworld() || level.dimension() == Level.OVERWORLD;
+    }
+
+    private static BlockPos walkedBlockPos(ServerPlayer player, ServerLevel level) {
+        BlockPos feetPos = player.blockPosition();
+        if (WildPathsConfig.find(level.getBlockState(feetPos)) != null) {
+            return feetPos;
+        }
+        return feetPos.below();
     }
 
     private void scanNearbySurface(ServerPlayer player, ServerLevel level, WildPathsSavedData data) {
