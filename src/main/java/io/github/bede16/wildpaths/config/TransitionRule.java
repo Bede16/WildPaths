@@ -15,7 +15,9 @@ public record TransitionRule(
         long dryingDelay,
         long dryingInterval,
         double dryingChanceDecrease,
+        double spreadChance,
         boolean resetOnWalk,
+        double neighborResetChance,
         boolean discoverNearby
 ) {
 }

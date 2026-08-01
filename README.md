@@ -59,7 +59,7 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
 
 ```json5
 {
-  configVersion: 9,
+  configVersion: 10,
 
   // Limits how much work Wild Paths performs at once.
   processing: {
@@ -162,6 +162,8 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       chanceIncrease: 0.05,
       maxChance: 1.0,
       resetOnWalk: true,
+      // Each horizontal neighboring path independently has this chance to reset too.
+      neighborResetChance: 0.50,
       discoverNearby: true,
     },
     {
@@ -178,6 +180,55 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       dryingInterval: 1200,
       dryingChanceDecrease: 0.01,
       resetOnWalk: false,
+      neighborResetChance: 0.0,
+      discoverNearby: true,
+    },
+    {
+      from: "minecraft:cobblestone_stairs",
+      to: "minecraft:mossy_cobblestone_stairs",
+      ticks: 0,
+      chanceInterval: 1200,
+      chance: 0.005,
+      chanceIncrease: 0.005,
+      maxChance: 0.15,
+      requiresRain: true,
+      dryingDelay: 2400,
+      dryingInterval: 1200,
+      dryingChanceDecrease: 0.01,
+      resetOnWalk: false,
+      neighborResetChance: 0.0,
+      discoverNearby: true,
+    },
+    {
+      from: "minecraft:cobblestone_slab",
+      to: "minecraft:mossy_cobblestone_slab",
+      ticks: 0,
+      chanceInterval: 1200,
+      chance: 0.005,
+      chanceIncrease: 0.005,
+      maxChance: 0.15,
+      requiresRain: true,
+      dryingDelay: 2400,
+      dryingInterval: 1200,
+      dryingChanceDecrease: 0.01,
+      resetOnWalk: false,
+      neighborResetChance: 0.0,
+      discoverNearby: true,
+    },
+    {
+      from: "minecraft:cobblestone_wall",
+      to: "minecraft:mossy_cobblestone_wall",
+      ticks: 0,
+      chanceInterval: 1200,
+      chance: 0.005,
+      chanceIncrease: 0.005,
+      maxChance: 0.15,
+      requiresRain: true,
+      dryingDelay: 2400,
+      dryingInterval: 1200,
+      dryingChanceDecrease: 0.01,
+      resetOnWalk: false,
+      neighborResetChance: 0.0,
       discoverNearby: true,
     },
     {
@@ -193,15 +244,66 @@ Wild Paths uses one configuration file, `config/wild_paths.json5`. JSON5 support
       dryingInterval: 1200,
       dryingChanceDecrease: 0.01,
       resetOnWalk: false,
+      neighborResetChance: 0.0,
+      discoverNearby: true,
+    },
+    {
+      from: "minecraft:stone_brick_stairs",
+      to: "minecraft:mossy_stone_brick_stairs",
+      ticks: 0,
+      chanceInterval: 1200,
+      chance: 0.005,
+      chanceIncrease: 0.005,
+      maxChance: 0.15,
+      requiresRain: true,
+      dryingDelay: 2400,
+      dryingInterval: 1200,
+      dryingChanceDecrease: 0.01,
+      resetOnWalk: false,
+      neighborResetChance: 0.0,
+      discoverNearby: true,
+    },
+    {
+      from: "minecraft:stone_brick_slab",
+      to: "minecraft:mossy_stone_brick_slab",
+      ticks: 0,
+      chanceInterval: 1200,
+      chance: 0.005,
+      chanceIncrease: 0.005,
+      maxChance: 0.15,
+      requiresRain: true,
+      dryingDelay: 2400,
+      dryingInterval: 1200,
+      dryingChanceDecrease: 0.01,
+      resetOnWalk: false,
+      neighborResetChance: 0.0,
+      discoverNearby: true,
+    },
+    {
+      from: "minecraft:stone_brick_wall",
+      to: "minecraft:mossy_stone_brick_wall",
+      ticks: 0,
+      chanceInterval: 1200,
+      chance: 0.005,
+      chanceIncrease: 0.005,
+      maxChance: 0.15,
+      requiresRain: true,
+      dryingDelay: 2400,
+      dryingInterval: 1200,
+      dryingChanceDecrease: 0.01,
+      resetOnWalk: false,
+      neighborResetChance: 0.0,
       discoverNearby: true,
     },
   ],
 }
 ```
 
-Each `from` block may appear only once. `ticks` is the protected time before the first roll. `chanceInterval` controls the delay between rolls. `chance` is the initial probability from greater than `0.0` through `1.0`; `chanceIncrease` is added after each failed roll, up to `maxChance`. Walking on a rule with `resetOnWalk` restarts its protected time and probability. When `requiresRain` is enabled, a roll only happens while rain can reach the block.
+Each `from` block may appear only once. `ticks` is the protected time before the first roll. `chanceInterval` controls the delay between rolls. `chance` is the initial probability from greater than `0.0` through `1.0`; `chanceIncrease` is added after each failed roll, up to `maxChance`. Walking on a rule with `resetOnWalk` restarts its protected time and probability. On a real crossing, each of the eight horizontal neighboring blocks with a `resetOnWalk` rule independently resets with the crossed rule's `neighborResetChance`; terrain one block above or below is included. Set it to `0.0` to disable neighboring resets. When `requiresRain` is enabled, a roll only happens while rain can reach the block.
 
-Rain-dependent rules can gradually dry again. After `dryingDelay` without rain reaching the block, the accumulated probability falls by `dryingChanceDecrease` every `dryingInterval`, but never below the base `chance`. Rain resumes from the remaining probability. With the moss defaults, failed rainy rolls add 0.5 percentage points per minute up to 15%; after two dry minutes, one percentage point is removed per further minute.
+Transitions are data-driven: adding another `from` and `to` pair uses the same logic without a dedicated code path. When both blocks share state properties, Wild Paths preserves them during replacement. This keeps stair direction and shape, slab type, wall connections, and `waterlogged` state intact for the default moss transformations.
+
+Rain-dependent rules can gradually dry again. After `dryingDelay` without rain reaching the block, the accumulated probability falls by `dryingChanceDecrease` every `dryingInterval`, but never below the base `chance`. Rain resumes from the remaining probability. With the moss defaults, failed rainy rolls add 0.5 percentage points per minute up to 15%; after two dry minutes, one percentage point is removed per further minute. While rain reaches both blocks, an immediately adjacent matching mossy target adds `spreadChance` to the current roll (2 percentage points by default for moss rules). Set it to `0.0` to disable moss spreading; no residual wetness is stored after rain ends.
 
 `pathCreation.transitions` contains the separate rules driven by configured traffic. `minimumWalks` is the guaranteed number of crossings before any roll can happen. Each later crossing rolls `chance`, increases it by `chanceIncrease` after a failure, and caps it at `maxChance`. A successful transition clears all wear at that position, so the next configured stage always starts at zero. With the defaults this produces `grass_block` -> `dirt` -> `dirt_path`. Every player and every renewed crossing counts, including walking back and forth or landing after a jump. Standing still, flying, and unconfigured creatures do not add repeated wear.
 
@@ -234,7 +336,7 @@ Wild Paths provides these administrator commands (permission level 2):
 
 The coordinate argument supports absolute and relative Minecraft coordinates, for example `/wildpaths debug ~ ~-1 ~`.
 
-The graphical editor exposes existing numeric values as text-entry fields, not sliders. It also provides editable entity-ID lists for always-active and player-ridden traffic mobs. It cannot add, remove, reorder, or rename block transitions and cannot change switches or transition block IDs. Saving updates the same `wild_paths.json5`; on a dedicated server, the server remains authoritative and accepts changes only from permission-level-2 administrators.
+The graphical editor exposes numbers as text-entry fields rather than sliders and covers the complete Wild Paths rule set: processing and feature switches, allowed-above entries, traffic-mob lists, transition block IDs, rule order, and every per-rule value. Transition lists use `namespace:block -> namespace:block`; entries can be added, renamed, removed, and reordered. New or renamed rules receive safe defaults, so save and reopen the screen once to edit their detail fields. Saving updates the same `wild_paths.json5`; on a dedicated server, the server remains authoritative, validates the complete submitted configuration, and accepts changes only from permission-level-2 administrators.
 
 ## Building
 
@@ -249,5 +351,4 @@ Every push and pull request runs the GitHub build and stores the matching JAR as
 ## License
 
 Wild Paths is available under the GNU General Public License v3.0.
-
 

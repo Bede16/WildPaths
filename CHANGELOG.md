@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.0
+
+- Let each neighboring dirt path reset its decay timer with a configurable 50% chance per crossing
+- Add rain-driven moss transitions for cobblestone and stone-brick stairs, slabs, and walls
+- Preserve shared block-state properties such as orientation, slab type, wall connections, and waterlogging
+- Expand YACL to edit feature switches, allowed-above entries, complete transition pairs, ordering, and every rule value
+- Let rain-exposed mossy blocks add a configurable 2% moss-growth bonus to adjacent matching blocks
+
 ## 2.1.0
 
 - Let nearby tall and short grass gain configurable trampling wear
@@ -71,5 +79,4 @@
 - Persist tracking data per dimension
 - Convert inactive dirt paths back into dirt
 - Add configurable decay timing and bounded processing
-
 

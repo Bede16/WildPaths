@@ -10,6 +10,7 @@ import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.SectionPos;
 import net.minecraft.nbt.CompoundTag;
@@ -20,6 +21,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.saveddata.SavedData;
 
 public final class WildPathsSavedData extends SavedData {
@@ -195,7 +197,11 @@ public final class WildPathsSavedData extends SavedData {
             return false;
         }
 
-        if (!level.setBlock(pos, transition.to().defaultBlockState(), Block.UPDATE_ALL)) {
+        BlockState replacement = copySharedProperties(
+                level.getBlockState(pos),
+                transition.to().defaultBlockState()
+        );
+        if (!level.setBlock(pos, replacement, Block.UPDATE_ALL)) {
             setDirty();
             return false;
         }
@@ -251,7 +257,8 @@ public final class WildPathsSavedData extends SavedData {
         }
 
         boolean wasDoublePlant = state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF);
-        if (!level.setBlock(pos, transition.to().defaultBlockState(), Block.UPDATE_ALL)) {
+        BlockState replacement = copySharedProperties(state, transition.to().defaultBlockState());
+        if (!level.setBlock(pos, replacement, Block.UPDATE_ALL)) {
             setDirty();
             return false;
         }
@@ -320,10 +327,18 @@ public final class WildPathsSavedData extends SavedData {
                     transition.maxChance(),
                     transition.chance() + failures * transition.chanceIncrease()
             );
+            if (transition.spreadChance() > 0.0
+                    && hasRainExposedAdjacentTarget(level, pos, transition)) {
+                chance = Math.min(transition.maxChance(), chance + transition.spreadChance());
+            }
             lastAttempts.put(packedPos, gameTime);
 
             if (level.random.nextDouble() <= chance) {
-                level.setBlock(pos, transition.to().defaultBlockState(), Block.UPDATE_ALL);
+                BlockState replacement = copySharedProperties(
+                        level.getBlockState(pos),
+                        transition.to().defaultBlockState()
+                );
+                level.setBlock(pos, replacement, Block.UPDATE_ALL);
                 removeWear(packedPos);
                 remove(packedPos);
                 decayed++;
@@ -335,6 +350,39 @@ public final class WildPathsSavedData extends SavedData {
         }
         processWearRecovery(level, gameTime, maxChecks);
         return decayed;
+    }
+
+    private static BlockState copySharedProperties(BlockState source, BlockState target) {
+        BlockState result = target;
+        for (Property<?> property : source.getProperties()) {
+            if (result.hasProperty(property)) {
+                result = copyProperty(source, result, property);
+            }
+        }
+        return result;
+    }
+
+    private static boolean hasRainExposedAdjacentTarget(
+            ServerLevel level,
+            BlockPos pos,
+            TransitionRule transition
+    ) {
+        for (Direction direction : Direction.values()) {
+            BlockPos adjacent = pos.relative(direction);
+            if (level.getBlockState(adjacent).is(transition.to())
+                    && level.isRainingAt(adjacent.above())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static <T extends Comparable<T>> BlockState copyProperty(
+            BlockState source,
+            BlockState target,
+            Property<T> property
+    ) {
+        return target.setValue(property, source.getValue(property));
     }
 
     public int size() {

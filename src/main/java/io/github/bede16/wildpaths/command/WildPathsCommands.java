@@ -411,7 +411,7 @@ public final class WildPathsCommands {
         if (entry == null) {
             return Component.literal(String.format(
                     Locale.ROOT,
-                    "WP | %s â†’ %s | not tracked",
+                    "WP | %s -> %s | not tracked",
                     shortBlockName(state),
                     shortBlockName(transition.to().defaultBlockState())
             ));
@@ -432,7 +432,7 @@ public final class WildPathsCommands {
                 : "";
         return Component.literal(String.format(
                 Locale.ROOT,
-                "WP | %s â†’ %s | %s | %.0f%%%s",
+                "WP | %s -> %s | %s | %.0f%%%s",
                 shortBlockName(state),
                 shortBlockName(transition.to().defaultBlockState()),
                 timer,
@@ -451,7 +451,7 @@ public final class WildPathsCommands {
         if (walks <= minimumWalks) {
             return Component.literal(String.format(
                     Locale.ROOT,
-                    "WP | %s â†’ %s | %d/%d | protected",
+                    "WP | %s -> %s | %d/%d | protected",
                     from,
                     to,
                     walks,
@@ -460,7 +460,7 @@ public final class WildPathsCommands {
         }
         return Component.literal(String.format(
                 Locale.ROOT,
-                "WP | %s â†’ %s | %d walks | %.0f%%",
+                "WP | %s -> %s | %d walks | %.0f%%",
                 from,
                 to,
                 walks,
@@ -495,4 +495,3 @@ public final class WildPathsCommands {
     private WildPathsCommands() {
     }
 }
-

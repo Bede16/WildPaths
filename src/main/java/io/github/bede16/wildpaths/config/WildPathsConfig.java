@@ -36,12 +36,12 @@ import java.util.Set;
 /** Loads all Wild Paths settings from one JSON5 file. */
 public final class WildPathsConfig {
     public static final String FILE_NAME = "wild_paths.json5";
-    private static final int CURRENT_CONFIG_VERSION = 9;
+    private static final int CURRENT_CONFIG_VERSION = 10;
     private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
 
     private static final String DEFAULT_JSON5 = """
             {
-              configVersion: 9,
+              configVersion: 10,
 
               // Limits how much work Wild Paths performs at once.
               processing: {
@@ -146,6 +146,8 @@ public final class WildPathsConfig {
                   chanceIncrease: 0.05,
                   maxChance: 1.0,
                   resetOnWalk: true,
+                  // Each horizontal neighboring path independently has this chance to reset too.
+                  neighborResetChance: 0.50,
                   discoverNearby: true,
                 },
                 {
@@ -162,6 +164,55 @@ public final class WildPathsConfig {
                   dryingInterval: 1200,
                   dryingChanceDecrease: 0.01,
                   resetOnWalk: false,
+                  neighborResetChance: 0.0,
+                  discoverNearby: true,
+                },
+                {
+                  from: "minecraft:cobblestone_stairs",
+                  to: "minecraft:mossy_cobblestone_stairs",
+                  ticks: 0,
+                  chanceInterval: 1200,
+                  chance: 0.005,
+                  chanceIncrease: 0.005,
+                  maxChance: 0.15,
+                  requiresRain: true,
+                  dryingDelay: 2400,
+                  dryingInterval: 1200,
+                  dryingChanceDecrease: 0.01,
+                  resetOnWalk: false,
+                  neighborResetChance: 0.0,
+                  discoverNearby: true,
+                },
+                {
+                  from: "minecraft:cobblestone_slab",
+                  to: "minecraft:mossy_cobblestone_slab",
+                  ticks: 0,
+                  chanceInterval: 1200,
+                  chance: 0.005,
+                  chanceIncrease: 0.005,
+                  maxChance: 0.15,
+                  requiresRain: true,
+                  dryingDelay: 2400,
+                  dryingInterval: 1200,
+                  dryingChanceDecrease: 0.01,
+                  resetOnWalk: false,
+                  neighborResetChance: 0.0,
+                  discoverNearby: true,
+                },
+                {
+                  from: "minecraft:cobblestone_wall",
+                  to: "minecraft:mossy_cobblestone_wall",
+                  ticks: 0,
+                  chanceInterval: 1200,
+                  chance: 0.005,
+                  chanceIncrease: 0.005,
+                  maxChance: 0.15,
+                  requiresRain: true,
+                  dryingDelay: 2400,
+                  dryingInterval: 1200,
+                  dryingChanceDecrease: 0.01,
+                  resetOnWalk: false,
+                  neighborResetChance: 0.0,
                   discoverNearby: true,
                 },
                 {
@@ -177,6 +228,55 @@ public final class WildPathsConfig {
                   dryingInterval: 1200,
                   dryingChanceDecrease: 0.01,
                   resetOnWalk: false,
+                  neighborResetChance: 0.0,
+                  discoverNearby: true,
+                },
+                {
+                  from: "minecraft:stone_brick_stairs",
+                  to: "minecraft:mossy_stone_brick_stairs",
+                  ticks: 0,
+                  chanceInterval: 1200,
+                  chance: 0.005,
+                  chanceIncrease: 0.005,
+                  maxChance: 0.15,
+                  requiresRain: true,
+                  dryingDelay: 2400,
+                  dryingInterval: 1200,
+                  dryingChanceDecrease: 0.01,
+                  resetOnWalk: false,
+                  neighborResetChance: 0.0,
+                  discoverNearby: true,
+                },
+                {
+                  from: "minecraft:stone_brick_slab",
+                  to: "minecraft:mossy_stone_brick_slab",
+                  ticks: 0,
+                  chanceInterval: 1200,
+                  chance: 0.005,
+                  chanceIncrease: 0.005,
+                  maxChance: 0.15,
+                  requiresRain: true,
+                  dryingDelay: 2400,
+                  dryingInterval: 1200,
+                  dryingChanceDecrease: 0.01,
+                  resetOnWalk: false,
+                  neighborResetChance: 0.0,
+                  discoverNearby: true,
+                },
+                {
+                  from: "minecraft:stone_brick_wall",
+                  to: "minecraft:mossy_stone_brick_wall",
+                  ticks: 0,
+                  chanceInterval: 1200,
+                  chance: 0.005,
+                  chanceIncrease: 0.005,
+                  maxChance: 0.15,
+                  requiresRain: true,
+                  dryingDelay: 2400,
+                  dryingInterval: 1200,
+                  dryingChanceDecrease: 0.01,
+                  resetOnWalk: false,
+                  neighborResetChance: 0.0,
                   discoverNearby: true,
                 },
               ],
@@ -271,6 +371,7 @@ public final class WildPathsConfig {
                 if (fileVersion < CURRENT_CONFIG_VERSION) {
                     root = migrate(root, fileVersion);
                 }
+                normalizeConfigScreenData(root);
                 return PRETTY_GSON.toJson(root);
             }
         } catch (Exception exception) {
@@ -279,7 +380,7 @@ public final class WildPathsConfig {
         }
     }
 
-    /** Updates supported number fields and traffic-mob lists while preserving rule identities and switches. */
+    /** Validates and atomically saves the complete config edited through YACL. */
     public static synchronized String applyConfigScreenChanges(String submittedJson) {
         Path configPath = FMLPaths.CONFIGDIR.get().resolve(FILE_NAME);
         Path temporaryPath = configPath.resolveSibling(FILE_NAME + ".tmp");
@@ -303,63 +404,14 @@ public final class WildPathsConfig {
                 if (Files.notExists(backupPath)) {
                     Files.copy(configPath, backupPath, StandardCopyOption.COPY_ATTRIBUTES);
                 }
-                current = migrate(current, fileVersion);
+                migrate(current, fileVersion);
             }
 
-            copyStringArray(current, submitted, "trafficMobs");
-            copyStringArray(current, submitted, "riddenTrafficMobs");
-
-            copyNumericProperties(
-                    current.getAsJsonObject("processing"),
-                    submitted.getAsJsonObject("processing"),
-                    "checkInterval",
-                    "maxChecksPerInterval",
-                    "nearbyScanRadius",
-                    "nearbyScanDepth",
-                    "nearbyScanColumnsPerPlayer"
-            );
-            copyNumericProperties(
-                    current.getAsJsonObject("wearRecovery"),
-                    submitted.getAsJsonObject("wearRecovery"),
-                    "delayTicks",
-                    "intervalTicks",
-                    "amountPerInterval"
-            );
-            copyTransitionNumbers(
-                    current.getAsJsonObject("pathCreation"),
-                    submitted.getAsJsonObject("pathCreation"),
-                    "minimumWalks",
-                    "chance",
-                    "chanceIncrease",
-                    "maxChance",
-                    "neighborChance"
-            );
-            copyTransitionNumbers(
-                    current.getAsJsonObject("trampling"),
-                    submitted.getAsJsonObject("trampling"),
-                    "minimumWalks",
-                    "chance",
-                    "chanceIncrease",
-                    "maxChance",
-                    "neighborChance"
-            );
-            copyTransitionNumbers(
-                    current,
-                    submitted,
-                    "ticks",
-                    "chanceInterval",
-                    "chance",
-                    "chanceIncrease",
-                    "maxChance",
-                    "dryingDelay",
-                    "dryingInterval",
-                    "dryingChanceDecrease"
-            );
-
-            Settings validated = parse(current);
+            submitted.addProperty("configVersion", CURRENT_CONFIG_VERSION);
+            Settings validated = parse(submitted);
             Files.writeString(
                     temporaryPath,
-                    "// Saved by the Wild Paths config screen.\n" + PRETTY_GSON.toJson(current) + "\n"
+                    "// Saved by the Wild Paths config screen.\n" + PRETTY_GSON.toJson(submitted) + "\n"
             );
             try {
                 Files.move(
@@ -622,7 +674,13 @@ public final class WildPathsConfig {
             double dryingChanceDecrease = object.has("dryingChanceDecrease")
                     ? object.get("dryingChanceDecrease").getAsDouble()
                     : 0.0;
+            double spreadChance = object.has("spreadChance")
+                    ? object.get("spreadChance").getAsDouble()
+                    : defaultSpreadChance(to, requiresRain);
             boolean resetOnWalk = !object.has("resetOnWalk") || object.get("resetOnWalk").getAsBoolean();
+            double neighborResetChance = object.has("neighborResetChance")
+                    ? object.get("neighborResetChance").getAsDouble()
+                    : 0.0;
             boolean discoverNearby = !object.has("discoverNearby") || object.get("discoverNearby").getAsBoolean();
 
             if (ticks < 0L) {
@@ -656,6 +714,14 @@ public final class WildPathsConfig {
                         "Transition drying requires rain and a chanceIncrease greater than 0"
                 );
             }
+            if (!Double.isFinite(spreadChance) || spreadChance < 0.0 || spreadChance > 1.0) {
+                throw new IllegalArgumentException("Transition spreadChance must be between 0 and 1");
+            }
+            if (!Double.isFinite(neighborResetChance)
+                    || neighborResetChance < 0.0
+                    || neighborResetChance > 1.0) {
+                throw new IllegalArgumentException("Transition neighborResetChance must be between 0 and 1");
+            }
             TransitionRule transition = new TransitionRule(
                     from,
                     to,
@@ -668,7 +734,9 @@ public final class WildPathsConfig {
                     dryingDelay,
                     dryingInterval,
                     dryingChanceDecrease,
+                    spreadChance,
                     resetOnWalk,
+                    neighborResetChance,
                     discoverNearby
             );
             if (transitions.put(from, transition) != null) {
@@ -714,6 +782,22 @@ public final class WildPathsConfig {
             );
         }
 
+        if (sourceVersion < 10) {
+            addMissingTimedNeighborResetChance(existing);
+            addMissingDefaultTimedTransitions(
+                    existing,
+                    defaults,
+                    Set.of(
+                            "minecraft:cobblestone_stairs",
+                            "minecraft:cobblestone_slab",
+                            "minecraft:cobblestone_wall",
+                            "minecraft:stone_brick_stairs",
+                            "minecraft:stone_brick_slab",
+                            "minecraft:stone_brick_wall"
+                    )
+            );
+        }
+
         JsonArray existingTransitions = existing.getAsJsonArray("transitions");
         JsonArray defaultTransitions = defaults.getAsJsonArray("transitions");
         if (existingTransitions != null && defaultTransitions != null) {
@@ -756,6 +840,146 @@ public final class WildPathsConfig {
         for (JsonElement element : transitions) {
             if (element.isJsonObject() && !element.getAsJsonObject().has(property)) {
                 element.getAsJsonObject().addProperty(property, value);
+            }
+        }
+    }
+
+    private static void addMissingTimedNeighborResetChance(JsonObject root) {
+        JsonArray transitions = root.getAsJsonArray("transitions");
+        if (transitions == null) {
+            return;
+        }
+
+        for (JsonElement element : transitions) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject transition = element.getAsJsonObject();
+            if (transition.has("neighborResetChance")) {
+                continue;
+            }
+            boolean dirtPath = transition.has("from")
+                    && "minecraft:dirt_path".equals(transition.get("from").getAsString());
+            transition.addProperty("neighborResetChance", dirtPath ? 0.50 : 0.0);
+        }
+    }
+
+    private static void normalizeConfigScreenData(JsonObject root) {
+        JsonObject processing = root.getAsJsonObject("processing");
+        if (processing != null && !processing.has("onlyOverworld")) {
+            processing.addProperty("onlyOverworld", false);
+        }
+
+        JsonObject recovery = root.getAsJsonObject("wearRecovery");
+        if (recovery != null && !recovery.has("enabled")) {
+            recovery.addProperty("enabled", true);
+        }
+
+        JsonObject pathCreation = root.getAsJsonObject("pathCreation");
+        normalizeTrafficSection(pathCreation);
+        if (pathCreation != null && !pathCreation.has("allowedAbove")) {
+            pathCreation.add("allowedAbove", new JsonArray());
+        }
+        normalizeTrafficSection(root.getAsJsonObject("trampling"));
+
+        int checkInterval = processing == null || !processing.has("checkInterval")
+                ? 200
+                : processing.get("checkInterval").getAsInt();
+        JsonArray transitions = root.getAsJsonArray("transitions");
+        if (transitions == null) {
+            return;
+        }
+        for (JsonElement element : transitions) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject rule = element.getAsJsonObject();
+            addIfMissing(rule, "chanceInterval", checkInterval);
+            addIfMissing(rule, "chance", 1.0);
+            addIfMissing(rule, "chanceIncrease", 0.0);
+            addIfMissing(rule, "maxChance", 1.0);
+            addIfMissing(rule, "requiresRain", false);
+            addIfMissing(rule, "dryingDelay", 0L);
+            addIfMissing(rule, "dryingInterval", rule.get("chanceInterval").getAsLong());
+            addIfMissing(rule, "dryingChanceDecrease", 0.0);
+            addIfMissing(
+                    rule,
+                    "spreadChance",
+                    defaultSpreadChance(
+                            resolveBlock(rule.get("to").getAsString()),
+                            rule.get("requiresRain").getAsBoolean()
+                    )
+            );
+            addIfMissing(rule, "resetOnWalk", true);
+            addIfMissing(rule, "neighborResetChance", 0.0);
+            addIfMissing(rule, "discoverNearby", true);
+        }
+    }
+
+    private static void normalizeTrafficSection(JsonObject section) {
+        if (section == null) {
+            return;
+        }
+        addIfMissing(section, "enabled", true);
+        JsonArray transitions = section.getAsJsonArray("transitions");
+        if (transitions == null) {
+            return;
+        }
+        for (JsonElement element : transitions) {
+            if (element.isJsonObject()) {
+                addIfMissing(element.getAsJsonObject(), "neighborChance", 0.50);
+            }
+        }
+    }
+
+    private static void addIfMissing(JsonObject object, String property, boolean value) {
+        if (!object.has(property)) {
+            object.addProperty(property, value);
+        }
+    }
+
+    private static void addIfMissing(JsonObject object, String property, long value) {
+        if (!object.has(property)) {
+            object.addProperty(property, value);
+        }
+    }
+
+    private static void addIfMissing(JsonObject object, String property, double value) {
+        if (!object.has(property)) {
+            object.addProperty(property, value);
+        }
+    }
+
+    private static double defaultSpreadChance(Block target, boolean requiresRain) {
+        ResourceLocation targetId = BuiltInRegistries.BLOCK.getKey(target);
+        return requiresRain && targetId.getPath().startsWith("mossy_") ? 0.02 : 0.0;
+    }
+
+    private static void addMissingDefaultTimedTransitions(
+            JsonObject existing,
+            JsonObject defaults,
+            Set<String> sourcesToAdd
+    ) {
+        JsonArray existingTransitions = existing.getAsJsonArray("transitions");
+        JsonArray defaultTransitions = defaults.getAsJsonArray("transitions");
+        if (existingTransitions == null || defaultTransitions == null) {
+            return;
+        }
+
+        Set<String> existingSources = new LinkedHashSet<>();
+        for (JsonElement element : existingTransitions) {
+            if (element.isJsonObject() && element.getAsJsonObject().has("from")) {
+                existingSources.add(element.getAsJsonObject().get("from").getAsString());
+            }
+        }
+
+        for (JsonElement element : defaultTransitions) {
+            if (!element.isJsonObject() || !element.getAsJsonObject().has("from")) {
+                continue;
+            }
+            String source = element.getAsJsonObject().get("from").getAsString();
+            if (sourcesToAdd.contains(source) && existingSources.add(source)) {
+                existingTransitions.add(element.deepCopy());
             }
         }
     }
@@ -852,75 +1076,6 @@ public final class WildPathsConfig {
                 && Double.compare(rule.get("chanceIncrease").getAsDouble(), chanceIncrease) == 0
                 && rule.has("maxChance")
                 && Double.compare(rule.get("maxChance").getAsDouble(), maxChance) == 0;
-    }
-
-    private static void copyTransitionNumbers(
-            JsonObject currentSection,
-            JsonObject submittedSection,
-            String... propertyNames
-    ) {
-        if (currentSection == null || submittedSection == null) {
-            return;
-        }
-        JsonArray currentTransitions = currentSection.getAsJsonArray("transitions");
-        JsonArray submittedTransitions = submittedSection.getAsJsonArray("transitions");
-        if (currentTransitions == null || submittedTransitions == null) {
-            return;
-        }
-
-        Map<String, JsonObject> submittedBySource = new LinkedHashMap<>();
-        for (JsonElement element : submittedTransitions) {
-            if (element.isJsonObject()
-                    && element.getAsJsonObject().has("from")
-                    && element.getAsJsonObject().get("from").isJsonPrimitive()
-                    && element.getAsJsonObject().get("from").getAsJsonPrimitive().isString()) {
-                JsonObject transition = element.getAsJsonObject();
-                submittedBySource.put(transition.get("from").getAsString(), transition);
-            }
-        }
-
-        for (JsonElement element : currentTransitions) {
-            if (!element.isJsonObject() || !element.getAsJsonObject().has("from")) {
-                continue;
-            }
-            JsonObject currentTransition = element.getAsJsonObject();
-            JsonObject submittedTransition = submittedBySource.get(
-                    currentTransition.get("from").getAsString()
-            );
-            copyNumericProperties(currentTransition, submittedTransition, propertyNames);
-        }
-    }
-
-    private static void copyNumericProperties(
-            JsonObject current,
-            JsonObject submitted,
-            String... propertyNames
-    ) {
-        if (current == null || submitted == null) {
-            return;
-        }
-        for (String propertyName : propertyNames) {
-            JsonElement value = submitted.get(propertyName);
-            if (current.has(propertyName)
-                    && value != null
-                    && value.isJsonPrimitive()
-                    && value.getAsJsonPrimitive().isNumber()) {
-                current.add(propertyName, value.deepCopy());
-            }
-        }
-    }
-
-    private static void copyStringArray(JsonObject current, JsonObject submitted, String propertyName) {
-        JsonArray submittedArray = submitted.getAsJsonArray(propertyName);
-        if (!current.has(propertyName) || submittedArray == null) {
-            return;
-        }
-        for (JsonElement element : submittedArray) {
-            if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
-                throw new IllegalArgumentException(propertyName + " must contain only entity type strings");
-            }
-        }
-        current.add(propertyName, submittedArray.deepCopy());
     }
 
     private static void mergeMissing(JsonObject target, JsonObject defaults) {
@@ -1187,5 +1342,4 @@ public final class WildPathsConfig {
     private WildPathsConfig() {
     }
 }
-
 

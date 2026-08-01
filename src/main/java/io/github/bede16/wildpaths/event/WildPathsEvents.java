@@ -235,7 +235,58 @@ public final class WildPathsEvents {
             }
         }
 
+        TransitionRule decayRule = WildPathsConfig.find(observedState);
+        if (landedOrEntered && decayRule != null && decayRule.resetOnWalk()) {
+            influenceNeighborDecayReset(level, data, observedPos, decayRule.neighborResetChance());
+        }
+
         lastWalkSamples.put(entity.getUUID(), new WalkSample(packedPos, entity.onGround()));
+    }
+
+    private static void influenceNeighborDecayReset(
+            ServerLevel level,
+            WildPathsSavedData data,
+            BlockPos center,
+            double chance
+    ) {
+        if (chance <= 0.0) {
+            return;
+        }
+
+        for (int offsetX = -1; offsetX <= 1; offsetX++) {
+            for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                if (offsetX == 0 && offsetZ == 0) {
+                    continue;
+                }
+
+                int blockX = center.getX() + offsetX;
+                int blockZ = center.getZ() + offsetZ;
+                if (level.getChunkSource().getChunkNow(
+                        SectionPos.blockToSectionCoord(blockX),
+                        SectionPos.blockToSectionCoord(blockZ)
+                ) == null) {
+                    continue;
+                }
+
+                for (int offsetY = 1; offsetY >= -1; offsetY--) {
+                    BlockPos neighborPos = center.offset(offsetX, offsetY, offsetZ);
+                    TransitionRule neighborRule = WildPathsConfig.find(level.getBlockState(neighborPos));
+                    if (neighborRule == null || !neighborRule.resetOnWalk()) {
+                        continue;
+                    }
+
+                    if (WildPathsSavedData.isProtected(level, neighborPos)) {
+                        data.clear(neighborPos);
+                        break;
+                    }
+
+                    if (level.random.nextDouble() <= chance) {
+                        data.recordUse(neighborPos, level.getGameTime());
+                    }
+                    break;
+                }
+            }
+        }
     }
 
     private static void influenceNeighborWear(
@@ -385,4 +436,3 @@ public final class WildPathsEvents {
     private record WalkSample(long packedPos, boolean onGround) {
     }
 }
-
